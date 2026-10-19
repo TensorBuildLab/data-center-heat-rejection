@@ -1,0 +1,39 @@
+{
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "Goodyear",
+        "note": "12 x 12 km: Stream PHXA1, KGYR, plume path and background"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              -112.4348,
+              33.3659
+            ],
+            [
+              -112.3052,
+              33.3659
+            ],
+            [
+              -112.3052,
+              33.4741
+            ],
+            [
+              -112.4348,
+              33.4741
+            ],
+            [
+              -112.4348,
+              33.3659
+            ]
+          ]
+        ]
+      }
+    }
+  ]
+}

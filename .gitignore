@@ -218,3 +218,14 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# ---- project: downloaded inputs and generated outputs (regenerate with the scripts)
+data/
+results/
+figures/
+building_energy/dl/
+building_energy/sim/
+building_energy/*.epw
+building_energy/dT_hourly.csv
+building_energy/dT_summary.json
+building_energy/energy_demo_results.csv
