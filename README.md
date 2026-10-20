@@ -110,10 +110,10 @@ The model is evaluated the way dispersion models usually are: it is run for the 
 
 > Sailor, D.J., Samareh Abolhassani, S., Martin, E.P. (2026). Data center waste heat as an emerging urban thermal hazard: first field measurements of neighborhood-scale air temperature impacts. *ASME Journal of Engineering for Sustainable Buildings and Cities* 7(2), 024501. https://doi.org/10.1115/1.4071922. Open access, CC-BY 4.0.
 
-`sailor2026_cases.csv` holds the four traverses with a reported facility capacity: CyrusOne PHX1–8 on two days, Digital Realty, and NTT PH1. Each row gives:
-- the downwind-minus-upwind mean and maximum air temperature;
-- the weather and the averaging distances;
-- the section or table of the paper each number comes from.
+The benchmark uses the four traverses with a reported facility capacity: CyrusOne PHX1–8 on two days, Digital Realty, and NTT PH1.
+- `sailor2026_cases.csv`: for each traverse, the published temperature difference between two averaging areas, the weather, the facility capacity, and the section or table of the article each number comes from.
+- `sailor2026_geometry.json`: the facility buildings and averaging areas, digitised from the article's Fig. 2 maps.
+- `PROTOCOL.md`: the input rules, written down before the comparison was run, and the history of the comparison.
 
 The values are reused under CC-BY with attribution. Please cite the paper if you use them.
 
@@ -121,13 +121,22 @@ The values are reused under CC-BY with attribution. Please cite the paper if you
 python validation/benchmarks/benchmark_sailor2026.py     # -> results/benchmarks/{benchmark.csv, metrics.json, fig_benchmark.png}
 ```
 
-| | FAC2 | FB | NMSE | MG |
-| --- | --- | --- | --- | --- |
-| Fan array (`fan_heat` = 80 kW) | 0.75 | 0.15 | 0.27 | 1.19 |
-| One merged plume (`fan_heat=None`) | 0 | 1.98 | 167 | – |
-| Acceptance (Chang & Hanna 2004) | ≥ 0.5 | magnitude ≤ 0.3 | ≤ 1.5 | 0.7–1.3 |
+Each building is a separate source, and the model is evaluated along the traverse path inside the same two averaging areas as the published difference.
 
-The benchmark covers four daytime cases at 100–500 m. It does not test the night-time mixed layer or the decay beyond 0.5 km. The fan-array treatment was added after the merged plume failed these cases, so this is a consistency check, not a blind test. `tutorial/02_validation_sailor2026.ipynb` walks through the comparison step by step and shows how to add new cases.
+| Case | Observed (°C) | Fan array, central (range) (K) | One merged plume (K) |
+| --- | --- | --- | --- |
+| a, CyrusOne, 18 Jun | 0.8 | 0.50 (0.36–0.64) | 0.006 |
+| b, CyrusOne, 8 Aug | 0.5 | 1.32 (0.67–2.02) | 0.006 |
+| d, Digital Realty, 25 Oct | 1.0 | 0.26 (0.16–0.41) | 0.005 |
+| e, NTT PH1, 25 Oct (near − far area) | 0.9 | 0.08 (0.06–0.12) | 0.000 |
+| Mean | 0.80 | 0.54 | 0.004 |
+
+What this shows:
+- **Mechanism and magnitude.** The fan-array model predicts warming of the observed order, about two-thirds of the observed mean. The merged plume predicts less than 0.01 K in every case, two orders of magnitude too low.
+- **Individual cases are not reproduced.** FAC2 is 0.25, FB 0.39, NMSE 1.14 and MG 2.25, against Chang & Hanna's acceptance of FAC2 ≥ 0.5 and magnitude of FB ≤ 0.3.
+- **Why single traverses are limited.** Each value is one 5–20 min pass, three of the four winds come from airports several kilometres away, and the compared areas differ in land cover. Case e in particular needs a wind closer to due south than the one recorded.
+
+The benchmark covers four daytime cases at 15–570 m. It does not test the night-time mixed layer or the decay beyond 0.5 km. An earlier version used square-equivalent sites and generic distances (repository commit f577c8e: FAC2 0.75); `PROTOCOL.md` explains why it was replaced. `tutorial/02_validation_sailor2026.ipynb` walks through the comparison step by step and shows how to add new cases.
 
 ## Tutorials: `tutorial/`
 
