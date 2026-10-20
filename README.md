@@ -2,15 +2,20 @@
 
 Code for the manuscript *Neighborhood-scale air temperature and humidity perturbations downwind of data center heat rejection* (Liang Zhang, University of Arizona; in preparation for *Energy and Buildings*).
 
-The core is **`dc_plume.py`**, a reduced-order model of the hourly 2 m air-temperature rise (ΔT) and humidity change (Δq, ΔRH) downwind of a data center's heat-rejection plant: dry coolers (air-cooled) or cooling towers (water-cooled). The other scripts produce the paper's figures, test the model against public data (weather stations and ECOSTRESS satellite land-surface temperature), estimate what each data source can detect, and feed the hourly ΔT into an EnergyPlus building model.
+The core is **`dc_plume.py`**, a reduced-order model of the hourly 2 m air-temperature rise (ΔT) and humidity change (Δq, ΔRH) downwind of a data center's heat-rejection plant: dry coolers (air-cooled) or cooling towers (water-cooled). The other scripts benchmark the model against published field measurements, produce the paper's figures, count the hours per year above 1 K around large campuses, and feed the hourly ΔT into an EnergyPlus building model.
+
+**New here? Start with the tutorials** in [`tutorial/`](tutorial/): `01_quickstart.ipynb` runs the model, and `02_validation_sailor2026.ipynb` reproduces the comparison with published measurements downwind of Phoenix data centers.
 
 ```
 dc_plume.py                 the model (single file, NumPy only)
-test_dc_plume.py            code-verification tests T1–T12 (pytest)
+test_dc_plume.py            code-verification tests T1–T13 (pytest)
+tutorial/                   Jupyter tutorials: quickstart and the validation case study
 docs/technical_reference.md full equations, assumptions, validity range, verification ledger
+validation/benchmarks/      benchmark against the Sailor et al. (2026) traverses (Fig. 2, Table 4)
 paper_figures/              Figures 3–6 and the sensitivity / stability / campus-size tables
-validation/                 station test, satellite test, detectability analysis
-building_energy/            hourly ΔT → modified weather file → EnergyPlus comparison
+analysis/                   hourly TMY3 exceedance of 0.5 / 1 / 2 K (Fig. 7, Table 7)
+building_energy/            hourly ΔT → modified weather file → EnergyPlus comparison (Table 8)
+validation/                 archive station and ECOSTRESS tests near Goodyear, AZ (Section 4.6)
 ```
 
 ## Install
@@ -21,6 +26,7 @@ Python 3.9 or newer.
 python -m venv .venv
 .venv/Scripts/activate          # Windows;  source .venv/bin/activate on macOS/Linux
 pip install -r requirements.txt
+python building_energy/get_weather.py   # Phoenix TMY3 into data/weather/ (for analysis/ and building_energy/)
 ```
 
 `dc_plume.py` itself needs only NumPy (SciPy is used for `erf` when installed). Run every script **from the repository root**; outputs go to `figures/`, `results/` and `data/`, which are git-ignored.
@@ -34,7 +40,7 @@ A steady-state (1-hour average) Gaussian plume adapted to large, low-velocity, b
    - `cooling_tower_source(Q_W, inlet_flow, amb, ...)`: cooling towers. The exhaust temperature is solved from the tower energy balance with a near-saturated exhaust (RH_exit 0.95), so it responds to the ambient wet-bulb.
 2. **Treats the campus as an area source, a point source, or a blend of the two** (`regime="auto"`):
    - *Area treatment.* The rejected heat mixes a convective layer over the footprint whose depth h_mix is the smallest of three limits: encroachment against the stable gradient, the convective-velocity limit, and the mixing height (`convective_mixing_depth`). It is released as a crosswind strip at the downwind edge.
-   - *Point treatment.* Briggs buoyant or momentum plume rise from the footprint centre, with partial penetration of the capping inversion.
+   - *Point treatment.* Briggs buoyant or momentum plume rise from the footprint centre, with partial penetration of the capping inversion. With `fan_heat` set (W per fan or tower cell), the plant is treated as an array of n = Q/fan_heat fan plumes on a square grid, and the rise of one fan plume is enhanced for merging with Briggs' (1974) multiple-source rule. The paper uses this setting (80 kW per dry-cooler fan, 8 MW per tower cell). With `fan_heat=None` the whole array is one merged plume. That plume rises hundreds of metres on hot days and predicts no daytime warming, contrary to the measurements in `validation/benchmarks/`.
    - *Blending.* The weight is w = R⁴/(1+R⁴), with R = footprint width / max(h_mix, fan height, point rise). Large campuses behave as area sources, small ones as point sources.
 3. **Disperses the heat** using:
    - lateral spread from the hourly wind-direction fluctuation σθ with Draxler's travel-time factor, so hourly meander is included;
@@ -48,14 +54,14 @@ import numpy as np
 from dc_plume import Ambient, dry_cooler_source, cooling_tower_source, plume
 
 night = Ambient(T=32.0, RH=0.20, U10=2.0, stability="F", mixing_height=150.0, elevation=340.0)
-air   = dry_cooler_source(137e6, 12.0, night, height=12.0, footprint_x=600.0,
-                          footprint_y=600.0, building_height=10.0)      # 100 MW IT, air-cooled
+air   = dry_cooler_source(137e6, 12.0, night, height=12.0, footprint_x=600.0, footprint_y=600.0,
+                          building_height=10.0, exit_velocity=3.0, fan_heat=80e3)    # 100 MW IT, air-cooled
 water = cooling_tower_source(125e6, 1650.0, night, height=15.0, footprint_x=300.0,
-                             footprint_y=200.0, building_height=10.0)  # 100 MW IT, water-cooled
+                             footprint_y=200.0, building_height=10.0, fan_heat=8e6)  # 100 MW IT, water-cooled
 
 x = np.linspace(50, 5000, 400)                       # m downwind of the campus centre
 r = plume(air, night, x)                             # plume axis, one wind direction
-print(np.interp([1000, 5000], x, r["dT"]))           # -> [0.486 0.161] K
+print(np.interp([1000, 5000], x, r["dT"]))           # -> [0.493 0.163] K
 m = plume(air, night, x[:, None], np.linspace(-2000, 2000, 201)[None, :])   # 2-D map
 radial = plume(air, night, x, mode="radial")         # average over all wind directions
 ```
@@ -70,12 +76,14 @@ Main options of `plume()`:
 | `alongwind_strips` | 1 = release at the downwind edge (upper near-field estimate); 2–5 = Gauss–Legendre strips over the footprint (lower estimate) |
 | `z` | receptor height (default 2 m, weather-station height) |
 
+Main options of the source helpers: `fan_heat` (W per fan or tower cell; `None` = one merged plume), `exit_velocity` (m/s), `height`, `footprint_x`, `footprint_y`, `building_height`.
+
 Key assumptions: steady state within the hour; horizontally homogeneous atmosphere; flat terrain; excess heat and vapor are passive after rise and mixing; wind below 1 m/s is clipped to 1 m/s. `docs/technical_reference.md` gives every equation (Section 5), the inputs and outputs (Sections 3–4), the validity range (Section 6), a worked Phoenix example (Section 7), and a ledger of every defect found and fixed during development and review (Section 8).
 
 ## Tests
 
 ```bash
-python -m pytest -q          # 21 tests, about 1–2 minutes
+python -m pytest -q          # 22 test cases (T1–T13, some parametrized), about 1–2 minutes
 ```
 
 | Test | What it checks | Criterion |
@@ -91,19 +99,61 @@ python -m pytest -q          # 21 tests, about 1–2 minutes
 | T9 | Momentum-rise branch is selected for a fast, weakly buoyant jet | momentum rise used |
 | T10 | Robustness: NaN inputs, negative x, lowercase class, out-of-range RH, impossible tower load | NaN / warning / ValueError as documented |
 | T11 | Mixing-line saturation check for tower exhaust: summer max RH 0.950, winter 1.002 | warning only in winter |
-| T12 | Reference case: air-cooled 0.486 / 0.161 K and water-cooled 0.052 / 0.009 K at 1 / 5 km | within 1e-3 K |
+| T12 | Reference case without `fan_heat`: air-cooled 0.486 / 0.161 K and water-cooled 0.052 / 0.009 K at 1 / 5 km | within 1e-3 K |
+| T13 | Fan-array rise: `fan_heat=None` unchanged; one fan equals the merged plume; smaller fans rise less; n merging fans rise at least as high as independent ones; invalid `fan_heat` raises | as stated |
 
 T12 guards against unintended changes in results. If a deliberate model change alters it, update the expected values and record the change in the technical reference's verification ledger.
 
+## Validation benchmark: `validation/benchmarks/`
+
+The model is evaluated the way dispersion models usually are: it is run for the conditions of a published field study, and predicted values are compared with observed ones using standard statistics (Chang & Hanna 2004). The benchmark is the only published set of air-temperature measurements downwind of operating data centers:
+
+> Sailor, D.J., Samareh Abolhassani, S., Martin, E.P. (2026). Data center waste heat as an emerging urban thermal hazard: first field measurements of neighborhood-scale air temperature impacts. *ASME Journal of Engineering for Sustainable Buildings and Cities* 7(2), 024501. https://doi.org/10.1115/1.4071922. Open access, CC-BY 4.0.
+
+`sailor2026_cases.csv` holds the four traverses with a reported facility capacity: CyrusOne PHX1–8 on two days, Digital Realty, and NTT PH1. Each row gives:
+- the downwind-minus-upwind mean and maximum air temperature;
+- the weather and the averaging distances;
+- the section or table of the paper each number comes from.
+
+The values are reused under CC-BY with attribution. Please cite the paper if you use them.
+
+```bash
+python validation/benchmarks/benchmark_sailor2026.py     # -> results/benchmarks/{benchmark.csv, metrics.json, fig_benchmark.png}
+```
+
+| | FAC2 | FB | NMSE | MG |
+| --- | --- | --- | --- | --- |
+| Fan array (`fan_heat` = 80 kW) | 0.75 | 0.15 | 0.27 | 1.19 |
+| One merged plume (`fan_heat=None`) | 0 | 1.98 | 167 | – |
+| Acceptance (Chang & Hanna 2004) | ≥ 0.5 | magnitude ≤ 0.3 | ≤ 1.5 | 0.7–1.3 |
+
+The benchmark covers four daytime cases at 100–500 m. It does not test the night-time mixed layer or the decay beyond 0.5 km. The fan-array treatment was added after the merged plume failed these cases, so this is a consistency check, not a blind test. `tutorial/02_validation_sailor2026.ipynb` walks through the comparison step by step and shows how to add new cases.
+
+## Tutorials: `tutorial/`
+
+```bash
+pip install notebook          # or jupyterlab
+jupyter notebook tutorial/
+```
+
+| Notebook | Contents |
+| --- | --- |
+| `01_quickstart.ipynb` | Weather and campus inputs; ΔT along the plume axis and as a map; air- versus water-cooled; night versus day; the effect of `fan_heat`; the wind-direction average |
+| `02_validation_sailor2026.ipynb` | The Sailor et al. (2026) benchmark: inputs, uncertainty ranges, FAC2 / FB / NMSE / MG, scatter plot, and how to add your own measurements |
+
+Both notebooks are stored with their outputs and run in about a minute.
+
 ## Paper figures: `paper_figures/`
 
-All four scripts share `reference_case.py`: the reference night (Phoenix, class F, U₁₀ = 2 m/s, z_i = 150 m, 32 °C, 20 % RH) and the 100 MW (IT) air-cooled and water-cooled campuses.
+All scripts share `reference_case.py`. It defines the reference night (Phoenix, class F, U₁₀ = 2 m/s, z_i = 150 m, 32 °C, 20 % RH) and the 100 MW (IT) air-cooled and water-cooled campuses, with the fan-array rise (80 kW per fan, 8 MW per tower cell). Set `DC_MERGED=1` to rerun them with the fully merged plume.
 
 | Script | Produces |
 | --- | --- |
 | `fig3_fig4_profiles_maps.py` | Fig. 3: plume-axis ΔT and ΔRH profiles, including the edge-release-to-strips band and the point-plume lower bound. Fig. 4: 2-D ΔT and ΔRH maps |
-| `fig5_sensitivity.py` | One-at-a-time sensitivity of ΔT at 1 and 5 km to σθ, dθ/dz, the entrainment constant, U₁₀, the blend exponent, along-wind treatment, heat load, C_H and z_i (Fig. 5, tornado chart). Also prints the stability × wind-speed matrix at 1 km for both technologies |
-| `fig6_campus_scale.py` | ΔT 0.5 and 3 km beyond the fence for 25–400 MW campuses at constant heat flux per area (Fig. 6). Also prints h_mix and fixed-distance values |
+| `fig5_sensitivity.py` | One-at-a-time sensitivity of ΔT at 1 and 5 km to σθ, dθ/dz, the entrainment constant, U₁₀, the blend exponent, along-wind treatment, heat load, C_H, z_i and heat per fan (Fig. 5, tornado chart). Also prints the day and night stability × wind-speed matrix at 1 km for both technologies (Table 6) |
+| `fig6_campus_scale.py` | ΔT 0.5 and 3 km beyond the fence for 25 MW–3 GW campuses at constant heat flux per area (Fig. 6). Also prints h_mix and fixed-distance values |
+| `validation/benchmarks/benchmark_sailor2026.py` | Fig. 2 and Table 4 (see above) |
+| `analysis/exceedance.py`, `analysis/plot_exceedance.py` | Table 7 and Fig. 7 (see below) |
 
 ```bash
 python paper_figures/fig3_fig4_profiles_maps.py
@@ -113,9 +163,28 @@ python paper_figures/fig6_campus_scale.py
 
 The manuscript figures were rendered with matplotlib 3.6. With that version these scripts reproduce them to within anti-aliasing (under 0.6 % of pixels differ). Newer matplotlib versions shift layout by a few pixels, but the data are unchanged.
 
-## Validation with public data: `validation/`
+## Hours per year above 1 K: `analysis/`
 
-These scripts test whether the predicted warming can be seen around a real campus, Stream Data Centers PHXA1 in Goodyear, Arizona (air-cooled, commissioned 2020-10-14), using only public data.
+`exceedance.py` runs the model for every hour of the Phoenix TMY3 year. It covers air-cooled campuses of 100 MW, 300 MW and 1 GW (IT; 1 kW IT per m² of heat-rejection footprint) and a 3 GW cluster over 3 km × 3 km. Each hour gets its Turner stability class and wind direction. On a 100 m grid, the script counts the hours with ΔT above 0.5, 1 and 2 K. It takes about 20 minutes.
+
+```bash
+python building_energy/get_weather.py      # once
+python analysis/exceedance.py              # -> results/exceedance/summary.csv and *.npy grids
+python analysis/plot_exceedance.py         # -> figures/fig7_exceedance_maps.png
+```
+
+| Campus | Max hours/yr > 1 K outside the fence (night / day) | Area with ≥ 100 h/yr > 1 K |
+| --- | --- | --- |
+| 100 MW | 609 (9 / 600) | 0.9 km² |
+| 300 MW | 1,144 (108 / 1,039) | 4.1 km² |
+| 1 GW | 2,380 (973 / 1,554) | 22 km² |
+| 3 GW cluster | 816 (816 / 0) | 55 km² |
+
+`FAN_HEAT=0` reruns the analysis with the merged plume.
+
+## Archive station and satellite tests: `validation/`
+
+These scripts test whether the predicted warming shows up in archive records around a small real campus: Stream Data Centers PHXA1 in Goodyear, Arizona (air-cooled, 4.5–40 MW, commissioned 2020-10-14). The predicted signal there (0.06–0.16 K) is below what the records can resolve, so the paper uses them only to bound the warming (Section 4.6). They are kept as general tools for sites with larger campuses.
 
 ### Station test: `asos_wind_signature.py`, `station_analysis.py`
 
@@ -167,22 +236,26 @@ This compares the predicted signal with the smallest effect each data source can
 
 The model's hourly ΔT is fed into an EnergyPlus run of a DOE prototype building, to show what the warming means for cooling energy downwind.
 
-1. **Weather:** download the Phoenix Sky Harbor TMY3 package (`USA_AZ_Phoenix-Sky.Harbor.Intl.AP.722780_TMY3`, `.epw`/`.ddy`/`.stat`) from [climate.onebuilding.org](https://climate.onebuilding.org) into `building_energy/dl/phx/`.
-2. **`make_epw.py`** computes the hourly ΔT (`dT_hourly.csv`) for buildings 0.5 and 1 km beyond the downwind fence of the 100 MW air-cooled reference campus. They sit at the bearing the night wind most often blows toward (west). Stability class comes from the Turner method; calm hours use the direction-averaged value. It reads `building_energy/PHX_TMY3.epw`, the same TMY3 year as shipped with [openstudio-standards](https://github.com/NREL/openstudio-standards); only `dT_hourly.csv` is used downstream (see the script header).
-3. **`rewrite_epw.py`** writes `PHX2_dc500m.epw`, `PHX2_dc1000m.epw` and a zero-ΔT control `PHX2_ctrl0.epw` from the onebuilding file. It changes only dry-bulb and RH, recomputed at constant dew point because dry coolers add no vapor. The control run must reproduce the baseline exactly.
-4. **Building model:** a DOE MidriseApartment from the ASHRAE 90.1-2019 template, climate zone 2B, built with OpenStudio 3.11 (`create_typical` / openstudio-standards). It has 4 stories, 27 zones, and PTACs with DX cooling and gas heating. Add hourly output meters `Cooling:Electricity`, `CoolingCoils:EnergyTransfer` and `Electricity:Facility`. Use the onebuilding `.ddy` design days in every run so sizing is identical. Simulate it with EnergyPlus 25.2 under the baseline EPW and the three `PHX2_*.epw` files, and save the `eplusout.sql` files as `building_energy/sim/{base,ctrl0,dc500m,dc1000m}.sql`.
-5. **`analyze.py`** compares annual and night-time cooling electricity, coil load, and peak cooling and facility demand, and writes `energy_demo_results.csv`.
+1. **Weather:** `python building_energy/get_weather.py` downloads the Phoenix Sky Harbor TMY3 package (`.epw`/`.ddy`/`.stat`) from [climate.onebuilding.org](https://climate.onebuilding.org) into `data/weather/`. The scripts also accept a copy in `building_energy/dl/phx/`.
+2. **`make_epw.py`** computes the hourly ΔT (`dT_hourly{TAG}.csv`) for buildings 0.5 and 1 km beyond the downwind fence of an air-cooled campus. The buildings sit at the bearing the night wind most often blows toward (west). Stability class comes from the Turner method, and calm hours use the direction-averaged value. Environment variables select the campus; the paper's Table 8 uses:
+   ```bash
+   DC_IT_MW=100  DC_L=600  DC_TAG=_100MW_fan python building_energy/make_epw.py
+   DC_IT_MW=1000 DC_L=1000 DC_TAG=_1GW_fan   python building_energy/make_epw.py
+   ```
+   It reads `building_energy/PHX_TMY3.epw` when present (the same TMY3 year as shipped with [openstudio-standards](https://github.com/NREL/openstudio-standards)) and the onebuilding copy otherwise. Only `dT_hourly{TAG}.csv` is used downstream (see the script header).
+3. **`rewrite_epw.py`** (same `DC_TAG`) writes `PHX2{TAG}_dc500m.epw`, `PHX2{TAG}_dc1000m.epw` and a zero-ΔT control `PHX2{TAG}_ctrl0.epw` from the onebuilding file. It changes only dry-bulb and RH; RH is recomputed at constant dew point because dry coolers add no vapor. The control run must reproduce the baseline exactly.
+4. **Building model:** a DOE MidriseApartment from the ASHRAE 90.1-2019 template, climate zone 2B, built with OpenStudio 3.11 (`create_typical` / openstudio-standards). It has 4 stories, 27 zones, and PTACs with DX cooling and gas heating. Add hourly output meters `Cooling:Electricity`, `CoolingCoils:EnergyTransfer` and `Electricity:Facility`. Use the onebuilding `.ddy` design days in every run so sizing is identical. Simulate it with EnergyPlus 25.2 under the baseline EPW and the three `PHX2_*.epw` files, and save the `eplusout.sql` files as `building_energy/sim/base.sql` and `building_energy/sim/<TAG without the leading _>_{ctrl0,dc500m,dc1000m}.sql` (for example `1GW_fan_dc500m.sql`).
+5. **`analyze.py`** (same `DC_TAG`) compares annual and night-time cooling electricity, coil load, and peak cooling and facility demand, and writes `energy_demo_results{TAG}.csv`. In the paper's runs, annual cooling electricity rises as follows (building 0.5 / 1 km beyond the fence):
+   - 100 MW campus: 0.70 % / 0.44 %;
+   - 1 GW campus: 3.8 % / 2.2 %.
 
 ## Reproducing the paper's numbers
 
-Every script here was rerun from a clean checkout against the inputs used for the paper. These outputs came out byte-identical to the manuscript's:
+The commands above reproduce the benchmark (`benchmark.csv`, `metrics.json`), the exceedance summary and the Table 8 changes in cooling electricity. For the archive tests, every script was rerun from a clean checkout against the inputs used for the paper, and these outputs came out byte-identical:
 - the reference case and the sensitivity, stability and campus-size tables;
 - all station-test tables;
 - all satellite-test tables (`contrast_summary.csv`, `scenes.csv`, `placebo_random_direction.csv`, `shape_vs_model.csv`, `lateral_profile_0.5-2km.csv`);
 - `detectability.csv`;
-- `dT_hourly.csv`;
-- the three modified weather files;
-- `energy_demo_results.csv`.
 
 A fresh download from IEM or AppEEARS can differ slightly if those archives are revised.
 
@@ -190,12 +263,13 @@ A fresh download from IEM or AppEEARS can differ slightly if those archives are 
 
 | Source | Used for | Terms |
 | --- | --- | --- |
+| Sailor et al. (2026), doi:10.1115/1.4071922 | Validation benchmark (values in `validation/benchmarks/sailor2026_cases.csv`) | CC-BY 4.0; cite the paper |
 | [Iowa Environmental Mesonet](https://mesonet.agron.iastate.edu/) ASOS/AWOS archive | Station test, wind at satellite overpass | Please acknowledge: "ASOS data were obtained from the Iowa Environmental Mesonet of Iowa State University." |
 | NASA ECOSTRESS `ECO_L2T_LSTE.002` via LP DAAC AppEEARS | Satellite test | NASA Earthdata open data policy; cite the dataset DOI |
-| [Climate.OneBuilding.Org](https://climate.onebuilding.org) TMY3 | Building-energy demonstration | See the site's terms of use |
+| [Climate.OneBuilding.Org](https://climate.onebuilding.org) TMY3 | Exceedance analysis, building-energy demonstration | See the site's terms of use |
 | [OpenStreetMap](https://www.openstreetmap.org/copyright) | Campus footprints (coordinates in `satellite_analysis.py`) | ODbL |
 
-No data are redistributed in this repository.
+Apart from the published benchmark values in `validation/benchmarks/sailor2026_cases.csv`, no data are redistributed in this repository.
 
 ## License
 

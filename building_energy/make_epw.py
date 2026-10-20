@@ -2,20 +2,21 @@
 make_epw.py - hourly dc_plume dT at fixed buildings near the reference campus, written
 into modified Phoenix TMY3 weather files for the Section 5.1 building-energy demonstration.
 
-Campus: Section 2.8 reference (100 MW IT air-cooled, 137 MW heat, 600 m x 600 m, fans at 12 m).
+Campus: Section 2.8 reference (100 MW IT air-cooled, 137 MW heat, 600 m x 600 m, fans at 12 m) by default.
+Environment variables: DC_IT_MW (IT load, MW; heat = 1.37 x IT), DC_L (square footprint side, m),
+FAN_HEAT (W per fan, default 80e3; 0 = one merged plume), DC_TAG (suffix for the output files).
+The paper's Table 8 uses DC_IT_MW=100 DC_L=600 DC_TAG=_100MW_fan and DC_IT_MW=1000 DC_L=1000 DC_TAG=_1GW_fan.
 Buildings: 0.5 and 1 km beyond the downwind fence (centre distance 0.8 and 1.3 km), at the
 bearing toward which the night wind most often blows in the TMY3 year.
 Each hour: wind from the EPW; Pasquill class by the Turner method (wind speed, solar
 elevation, total sky cover); mixing height 1500 (A-C), 800 (D), 300 (E), 150 m (F);
 calm hours (U < 0.5 m/s): direction-averaged ('radial') value at U = 1 m/s.
 Humidity ratio is unchanged (dry coolers add no vapour): dew point kept, RH recomputed.
-Outputs: PHX_TMY3_dc{500,1000}m.epw, dT_hourly.csv, summary in dT_summary.json
+Outputs: PHX_TMY3{TAG}_dc{500,1000}m.epw, dT_hourly{TAG}.csv, summary in dT_summary{TAG}.json
 
 Input PHX_TMY3.epw is the Phoenix Sky Harbor TMY3 file shipped with openstudio-standards. Only
-dT_hourly.csv is used downstream: rewrite_epw.py applies it to the climate.onebuilding.org copy of
-the same TMY3 year, whose .ddy/.stat set the design days. The two copies have identical dry-bulb,
-wind and sky cover (the dT inputs) and differ only in dew point/RH (4 % of hours) and radiation,
-so the PHX_TMY3_dc*.epw files written here are superseded and not used in the paper.
+dT_hourly{TAG}.csv is used downstream: rewrite_epw.py applies it to the climate.onebuilding.org copy of
+the same TMY3 year (python building_energy/get_weather.py), whose .ddy/.stat set the design days.
 """
 import json, os, sys, warnings
 import numpy as np, pandas as pd
@@ -23,8 +24,15 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."
 import dc_plume as dp
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+IT_MW = float(os.environ.get("DC_IT_MW", 100))          # 100 MW IT -> 137 MW heat (reference case)
+L_FP = float(os.environ.get("DC_L", 600))                 # m, square footprint
+FAN_HEAT = float(os.environ.get("FAN_HEAT", 80e3)) or None  # W per fan; 0 -> one merged plume
+TAG = os.environ.get("DC_TAG", "")
 LAT, LON, TZ = 33.45, -111.98, -7.0
-lines = open(os.path.join(HERE, "PHX_TMY3.epw"), encoding="latin-1").read().splitlines()
+SRC = os.path.join(HERE, "PHX_TMY3.epw")
+if not os.path.exists(SRC):   # fall back to the onebuilding copy (python building_energy/get_weather.py)
+    SRC = os.path.join(HERE, "..", "data", "weather", "USA_AZ_Phoenix-Sky.Harbor.Intl.AP.722780_TMY3.epw")
+lines = open(SRC, encoding="latin-1").read().splitlines()
 head, data = lines[:8], [l.split(",") for l in lines[8:] if l.strip()]
 cols = dict(month=1, day=2, hour=3, T=6, Td=7, RH=8, P=9, wdir=20, wspd=21, sky=22)
 w = pd.DataFrame({k: [float(r[i]) for r in data] for k, i in cols.items()})
@@ -65,14 +73,15 @@ bearing = float(pd.Series((np.round(to / 10) * 10) % 360).value_counts().idxmax(
 
 res = {}
 for dist in (500.0, 1000.0):
-    r_c = 300.0 + dist                          # from campus centre
+    r_c = L_FP / 2 + dist                       # from campus centre
     dT = np.zeros(len(w))
     for i in range(len(w)):
         U = max(float(w.wspd[i]), 0.5)
         amb = dp.Ambient(T=float(w["T"][i]), RH=min(max(w.RH[i] / 100, 0.01), 1.0), U10=max(U, 1.0),
                          stability=stab[i], mixing_height=ZI[stab[i]], elevation=340.0)
-        src = dp.dry_cooler_source(137e6, 12.0, amb, height=12.0, footprint_x=600.0,
-                                   footprint_y=600.0, building_height=10.0)
+        src = dp.dry_cooler_source(1.37 * IT_MW * 1e6, 12.0, amb, height=12.0, footprint_x=L_FP,
+                                   footprint_y=L_FP, building_height=10.0, exit_velocity=3.0 if FAN_HEAT else 6.0,
+                                   fan_heat=FAN_HEAT)
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
             if calm[i]:
@@ -92,12 +101,12 @@ for dist in (500.0, 1000.0):
         r[6] = f"{T_new:.1f}"
         r[8] = f"{min(rh, 100):.0f}"
         out.append(",".join(r))
-    with open(os.path.join(HERE, f"PHX_TMY3_dc{int(dist)}m.epw"), "w", encoding="latin-1", newline="\r\n") as f:
+    with open(os.path.join(HERE, f"PHX_TMY3{TAG}_dc{int(dist)}m.epw"), "w", encoding="latin-1", newline="\r\n") as f:
         f.write("\n".join(head + out) + "\n")
 
 hourly = pd.DataFrame(dict(month=w.month, day=w.day, hour=w.hour, T=w["T"], wdir=w.wdir, wspd=w.wspd,
                            stability=stab, night=night, dT_500m=res[500], dT_1000m=res[1000]))
-hourly.to_csv(os.path.join(HERE, "dT_hourly.csv"), index=False, float_format="%.4f")
+hourly.to_csv(os.path.join(HERE, f"dT_hourly{TAG}.csv"), index=False, float_format="%.4f")
 summ = {"bearing_deg": bearing,
         "stability_counts": pd.Series(stab).value_counts().to_dict()}
 for d in (500, 1000):
@@ -106,5 +115,5 @@ for d in (500, 1000):
                          max=float(x.max()), p95=float(np.percentile(x, 95)),
                          hours_gt_0p1=int((x > 0.1).sum()), hours_gt_0p3=int((x > 0.3).sum()),
                          degree_hours_K=float(x.sum()))
-json.dump(summ, open(os.path.join(HERE, "dT_summary.json"), "w"), indent=1)
+json.dump(summ, open(os.path.join(HERE, f"dT_summary{TAG}.json"), "w"), indent=1)
 print(json.dumps(summ, indent=1))

@@ -17,10 +17,13 @@ def meter(sql, name):
     return df
 
 
-dT = pd.read_csv(os.path.join(HERE, "dT_hourly.csv"))
+TAG = os.environ.get("DC_TAG", "")           # same suffix as make_epw.py; sim/{TAG[1:]}_dc500m.sql etc.
+PRE = TAG.lstrip("_") + "_" if TAG else ""
 rows, series = [], {}
 for case in ("base", "ctrl0", "dc500m", "dc1000m"):
-    sql = os.path.join(HERE, "sim", f"{case}.sql")
+    sql = os.path.join(HERE, "sim", f"{case}.sql" if case == "base" else f"{PRE}{case}.sql")
+    if not os.path.exists(sql):
+        print("skipped (not run):", sql); continue
     ce = meter(sql, "Cooling:Electricity")
     cc = meter(sql, "CoolingCoils:EnergyTransfer")
     fe = meter(sql, "Electricity:Facility")
@@ -35,12 +38,13 @@ for case in ("base", "ctrl0", "dc500m", "dc1000m"):
                      peak_cooling_elec_kW=s["ce"].max(), peak_coil_load_kW=s["cc"].max(),
                      peak_facility_kW=s["fe"].max(), facility_MWh=s["fe"].sum() / 1000))
 tab = pd.DataFrame(rows).set_index("case")
-for c in ("ctrl0", "dc500m", "dc1000m"):
+CASES = [c for c in ("ctrl0", "dc500m", "dc1000m") if c in series]
+for c in CASES:
     for k in tab.columns:
         tab.loc[f"{c} change %", k] = 100 * (tab.loc[c, k] / tab.loc["base", k] - 1)
 # hour-of-peak, and the largest hourly increase in cooling electricity
-for c in ("ctrl0", "dc500m", "dc1000m"):
+for c in CASES:
     d = series[c]["ce"] - series["base"]["ce"]
     tab.loc[c, "max_hourly_increase_kW"] = d.max()
-tab.round(3).to_csv(os.path.join(HERE, "energy_demo_results.csv"))
+tab.round(3).to_csv(os.path.join(HERE, f"energy_demo_results{TAG}.csv"))
 print(tab.round(3).T.to_string())

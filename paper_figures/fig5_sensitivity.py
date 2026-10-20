@@ -24,9 +24,12 @@ warnings.filterwarnings("ignore")
 X = np.array([1000.0, 5000.0])            # receptors on the plume axis, m from campus centre
 
 
-def dT(amb=NIGHT, Q=137e6, **kw):
+def dT(amb=NIGHT, Q=137e6, fan_heat=None, **kw):
     """Plume-axis dT (K) at 1 and 5 km for the air-cooled campus."""
-    return plume(air_cooled(amb, Q), amb, X, **kw)["dT"]
+    src = air_cooled(amb, Q)
+    if fan_heat is not None:
+        src = dataclasses.replace(src, fan_heat=fan_heat)
+    return plume(src, amb, X, **kw)["dT"]
 
 
 def with_A(A):
@@ -54,6 +57,7 @@ ROWS = [
     ("Heat-transfer coeff. C_H (0.004 / 0.001)", dT(rep(heat_loss_velocity=v_h(0.004))),
      dT(rep(heat_loss_velocity=v_h(0.001)))),
     ("Mixing height z_i (100 / 300 m)", dT(rep(mixing_height=100.0)), dT(rep(mixing_height=300.0))),
+    ("Heat per fan (40 / 160 kW)", dT(fan_heat=40e3), dT(fan_heat=160e3)),
 ]
 BASE = dT()
 
@@ -92,5 +96,5 @@ if __name__ == "__main__":
                           Patch(color="#c0392b", label="Second value in label")],
                  frameon=False, fontsize=7, loc="lower right")
     fig.tight_layout()
-    fig.savefig(fig_path("fig5_sensitivity.png"), dpi=200)
+    fig.savefig(fig_path("fig5_sensitivity.png"), dpi=200, bbox_inches="tight")
     print("\nwrote", fig_path("fig5_sensitivity.png"))

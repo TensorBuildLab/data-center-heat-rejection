@@ -8,9 +8,12 @@ import dc_plume as dp
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 BASE = os.path.join(HERE, "dl", "phx", "USA_AZ_Phoenix-Sky.Harbor.Intl.AP.722780_TMY3.epw")
+if not os.path.exists(BASE):  # same file as downloaded by python building_energy/get_weather.py
+    BASE = os.path.join(HERE, "..", "data", "weather", "USA_AZ_Phoenix-Sky.Harbor.Intl.AP.722780_TMY3.epw")
 lines = open(BASE, encoding="latin-1").read().splitlines()
 head, data = lines[:8], lines[8:]
-dT = pd.read_csv(os.path.join(HERE, "dT_hourly.csv"))
+TAG = os.environ.get("DC_TAG", "")
+dT = pd.read_csv(os.path.join(HERE, f"dT_hourly{TAG}.csv"))
 assert len(dT) == len(data) == 8760
 for name, col in (("ctrl0", None), ("dc500m", "dT_500m"), ("dc1000m", "dT_1000m")):
     out = []
@@ -24,6 +27,6 @@ for name, col in (("ctrl0", None), ("dc500m", "dT_500m"), ("dc1000m", "dT_1000m"
         if col is not None:
             r[8] = f"{min(rh, 100):.0f}"
         out.append(",".join(r))
-    with open(os.path.join(HERE, f"PHX2_{name}.epw"), "w", encoding="latin-1", newline="\r\n") as f:
+    with open(os.path.join(HERE, f"PHX2{TAG}_{name}.epw"), "w", encoding="latin-1", newline="\r\n") as f:
         f.write("\n".join(head + out) + "\n")
 print("written")

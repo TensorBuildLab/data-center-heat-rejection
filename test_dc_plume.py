@@ -1,5 +1,5 @@
 """
-Regression suite for dc_plume.py: code-verification tests T1-T12 (listed in README.md,
+Regression suite for dc_plume.py: code-verification tests T1-T13 (listed in README.md,
 "Tests"; the conservation and limit checks are derived in docs/technical_reference.md, Section 8).
 
 Run from the repo root:  python -m pytest -q
@@ -256,3 +256,25 @@ def test_T12_reference_case(case):
     got = (np.interp(1000, x, dT), np.interp(5000, x, dT))
     assert got[0] == pytest.approx(T12[case][0], abs=1e-3)
     assert got[1] == pytest.approx(T12[case][1], abs=1e-3)
+
+
+# ---------------------------------------------------------------- T13
+def test_T13_fan_array_rise():
+    """Fan-array rise (Briggs 1974 multiple-source merging): fan_heat=None leaves results
+    unchanged; one fan per source reproduces n_plumes=1; more, smaller fans rise less, and
+    the merged rise of n fans lies between one fan's rise and the single merged plume."""
+    amb = Ambient(T=40.0, RH=0.15, U10=1.5, stability="A", mixing_height=2500.0, elevation=370.0)
+    geom = dict(height=22.0, footprint_x=300.0, footprint_y=300.0, building_height=20.0)
+    base = dp.dry_cooler_source(100e6, 11.0, amb, **geom)
+    one = dp.dry_cooler_source(100e6, 11.0, amb, fan_heat=1e12, **geom)
+    x = np.array([400.0])
+    assert plume(base, amb, x, regime="point")["final_rise"] == pytest.approx(
+        plume(one, amb, x, regime="point")["final_rise"], rel=1e-9)
+    rises = [plume(dp.dry_cooler_source(100e6, 11.0, amb, fan_heat=q, **geom), amb, x,
+                   regime="point")["final_rise"] for q in (1e7, 1e6, 1e5)]
+    assert rises[0] > rises[1] > rises[2] > 0
+    single = plume(dp.dry_cooler_source(100e6, 11.0, amb, n_plumes=1000, **geom), amb, x,
+                   regime="point")["final_rise"]
+    assert rises[2] >= single
+    with pytest.raises(ValueError):
+        plume(dp.dry_cooler_source(100e6, 11.0, amb, fan_heat=-1.0, **geom), amb, x)

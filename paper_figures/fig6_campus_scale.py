@@ -1,7 +1,7 @@
 """
 fig6_campus_scale.py - effect of campus size on the downwind temperature rise (Section 4.4, Fig. 6).
 
-IT capacity is swept from 25 to 400 MW on the reference night. Heat rejected scales with IT load
+IT capacity is swept from 25 MW to 3 GW on the reference night. Heat rejected scales with IT load
 (1.37 W/W air-cooled, 1.25 W/W water-cooled), and the footprint grows at constant heat flux per
 unit area (side ~ sqrt(IT)), so a bigger campus is a wider source, not a hotter one.
 dT is evaluated on the plume axis 0.5 km and 3 km beyond the downwind fence line, so campuses of
@@ -19,7 +19,7 @@ from reference_case import AIR, HEAT_PER_IT, NIGHT, WATER, air_cooled, fig_path,
 from dc_plume import plume
 
 warnings.filterwarnings("ignore")
-IT = np.array([25, 50, 100, 200, 400])           # MW
+IT = np.array([25, 50, 100, 200, 400, 1000, 3000])   # MW
 
 
 def campuses(it):
@@ -51,18 +51,20 @@ if __name__ == "__main__":
               f"{r['water_c1']:.3f} {r['water_c5']:.3f}")
 
     get = lambda k: [r[k] for r in rows]
-    fig, ax = plt.subplots(figsize=(3.6, 3.0))
+    fig, ax = plt.subplots(figsize=(3.8, 3.6))
     ax.plot(IT, get("air_05"), "o-", color=AIR, label="Air-cooled, 0.5 km")
     ax.plot(IT, get("air_3"), "o--", color=AIR, mfc="w", label="Air-cooled, 3 km")
     ax.plot(IT, get("water_05"), "s-", color=WATER, label="Water-cooled, 0.5 km")
     ax.plot(IT, get("water_3"), "s--", color=WATER, mfc="w", label="Water-cooled, 3 km")
-    ax.set(xscale="log", xlabel="IT capacity (MW)", ylabel="ΔT at 2 m on plume axis (K)", ylim=(0, 0.78))
+    ax.axhline(1.0, color="0.3", lw=0.8, ls=":")
+    ax.text(IT[-1], 0.97, "1 K", fontsize=7, color="0.3", va="top", ha="right")
+    ax.set(xscale="log", xlabel="IT capacity (MW)", ylabel="ΔT at 2 m on plume axis (K)", ylim=(0, None))
     ax.set_xticks(IT)
     ax.set_xticklabels(IT)
     ax.xaxis.set_minor_formatter(NullFormatter())   # newer matplotlib would also label minor log ticks
-    ax.legend(frameon=False, fontsize=7, ncol=2, loc="upper left")
+    ax.legend(frameon=False, fontsize=7, ncol=2, loc="upper center", bbox_to_anchor=(0.5, -0.2))
     ax.grid(alpha=.3)
     ax.set_title("Distance beyond downwind fence line", fontsize=8, loc="left")
     fig.tight_layout()
-    fig.savefig(fig_path("fig6_scale.png"), dpi=200)
+    fig.savefig(fig_path("fig6_scale.png"), dpi=200, bbox_inches="tight")
     print("\nwrote", fig_path("fig6_scale.png"))

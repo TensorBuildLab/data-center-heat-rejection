@@ -105,6 +105,10 @@ class HeatSource:
     RH_exit: Optional[float] = None  # 0-1; None = same specific humidity as ambient (dry cooler)
     n_plumes: int = 1           # 1 = all fans merge (max rise); N = independent plumes (min rise)
     building_height: float = 0.0  # m, adds initial vertical spread (wake mixing)
+    fan_heat: Optional[float] = None  # W rejected per fan or tower cell (sensible + latent).
+                                      # When set, plume rise follows Briggs' (1974) multiple-
+                                      # source merging for the fan array (_point_rise) and
+                                      # n_plumes is ignored. None: n_plumes behaviour.
 
 @dataclass
 class Ambient:
@@ -250,9 +254,32 @@ _C_H_STABLE = 0.004      # bulk heat-transfer coefficient, stable surface layer
 _V_RAD = 0.001           # m/s, longwave loss of a warm air-layer anomaly (approx.)
 
 
+def _fan_array(src, st):
+    """Number of fans and their mean spacing (m) when fan_heat is given."""
+    n = max(1, int(round(abs(st["Q_total"]) / src.fan_heat)))
+    return n, float(np.sqrt(src.footprint_x * src.footprint_y / n))
+
+
 def _point_rise(src, st, amb, stab, s, U_s, d):
     """Point-regime rise along distance d: buoyant (Briggs) or momentum, whichever
-    gives the larger final rise. Returns (dh(d), dh_final)."""
+    gives the larger final rise. Returns (dh(d), dh_final).
+    With fan_heat set, the array is n fans on a square grid; the buoyant rise of one fan
+    is enhanced by merging along each crosswind row of N = sqrt(n) fans spaced dx apart
+    (Briggs 1974, plume rise from multiple sources):
+        dh = dh_1 E,  E = ((N + S)/(1 + S))^(1/3),  S = 6 [(N - 1) dx / (N^(1/3) dh_1)]^(3/2)."""
+    if src.fan_heat is not None:
+        n, dx = _fan_array(src, st)
+        dh_x, dh_f = briggs_rise(st["F_b"] / n, U_s, stab, s, d)
+        if dh_f > 0 and n > 1:
+            N = max(1.0, np.sqrt(n))
+            S = 6.0 * ((N - 1.0) * dx / (N ** (1 / 3) * dh_f)) ** 1.5
+            E = ((N + S) / (1.0 + S)) ** (1 / 3)
+            dh_x, dh_f = dh_x * E, dh_f * E
+        d_plume = np.sqrt(4 * src.exit_area / (np.pi * n))
+        dh_m = momentum_rise(st["w0"], d_plume, src.T_exit + 273.15, amb.T + 273.15, U_s, stab, s)
+        if dh_m > dh_f:
+            return np.full_like(np.asarray(d, float), dh_m), dh_m
+        return dh_x, dh_f
     dh_x, dh_f = briggs_rise(st["F_b"] / src.n_plumes, U_s, stab, s, d)
     d_plume = np.sqrt(4 * src.exit_area / (np.pi * src.n_plumes))     # one plume
     dh_m = momentum_rise(st["w0"], d_plume, src.T_exit + 273.15, amb.T + 273.15,
@@ -403,6 +430,8 @@ def plume(src: HeatSource, amb: Ambient, x, y=0.0, z=2.0,
         raise ValueError("RH inputs must be fractions between 0 and 1")
     if src.flow <= 0 or src.exit_area <= 0 or amb.mixing_height <= 0 or src.n_plumes < 1:
         raise ValueError("flow, exit_area, mixing_height must be > 0 and n_plumes >= 1")
+    if src.fan_heat is not None and not src.fan_heat > 0:
+        raise ValueError("fan_heat must be > 0 (W per fan) or None")
     if mode not in ("centerline", "radial"):
         raise ValueError("mode must be 'centerline' or 'radial'")
     if lateral not in ("sigma_theta", "pg"):

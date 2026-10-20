@@ -84,7 +84,8 @@ All inputs are grouped into two dataclasses, `HeatSource` (the equipment) and `A
 | `exit_area` | m² | Total fan outlet area, all units combined | Sets exit velocity w0 = flow / exit\_area; typically 5–10 m/s |
 | `footprint_x` | m | Along-wind size of the heat-rejection area | Masks receptors inside the source; sets residence time, footprint area, and the downwind-edge release position in the area treatment |
 | `footprint_y` | m | Crosswind size of the heat-rejection area | Crosswind width of the uniform source, integrated exactly (Section 5.10) |
-| `n_plumes` | – | Number of independent plumes sharing the buoyancy | Point regime only. 1 = all fans merge (maximum rise). N\_fans = no merging (minimum rise). Default 1 |
+| `n_plumes` | – | Number of independent plumes sharing the buoyancy | Point regime only. 1 = all fans merge (maximum rise). N\_fans = no merging (minimum rise). Default 1. Ignored when `fan_heat` is set |
+| `fan_heat` | W | Heat rejected per fan or tower cell (sensible + latent) | Point regime only. When set, the plant is a fan array whose individual plumes merge by Briggs' multiple-source rule (Section 5.5). Dry-cooler and condenser fans 50–150 kW (80 kW used in the paper); tower cells 5–10 MW (8 MW). `None` (default) keeps the `n_plumes` behaviour |
 | `building_height` | m | Height of the structure the equipment sits on | Sets initial vertical spread σz0 = building\_height / 2.15 to mimic wake mixing. 0 to disable |
 
 ### 3.2 Ambient
@@ -117,7 +118,7 @@ All inputs are grouped into two dataclasses, `HeatSource` (the equipment) and `A
 | blend\_n | – | Exponent of the area/point blend weight; default 4 (Section 5.13) |
 | alongwind\_strips | – | 1 (default): area release at the downwind edge, upper near-field estimate. 2–5: Gauss–Legendre strips over the footprint length, lower near-field estimate (Section 5.13) |
 
-In radial mode a non-zero y raises a warning that it is ignored. Input checks raise `ValueError` for a stability class outside A–F, RH outside 0–1, non-positive flow, exit area or mixing height, and `n_plumes` < 1.
+In radial mode a non-zero y raises a warning that it is ignored. Input checks raise `ValueError` for a stability class outside A–F, RH outside 0–1, non-positive flow, exit area or mixing height, `n_plumes` < 1, and `fan_heat` ≤ 0.
 
 ### 3.4 Building sources from heat rejection
 
@@ -285,7 +286,17 @@ Gradual rise ("two-thirds law"), capped at the final rise \[Briggs 1975\]:
 \Delta h(x) = \min\!\left[\frac{1.6\,F^{1/3}\,x^{2/3}}{U_{rise}},\; \Delta h_f\right]
 ```
 
-The choice of n\_plumes brackets the merging problem: n = 1 assumes all fan plumes merge into one (maximum rise), n = number of fans assumes none merge (minimum rise). Partial merging can be represented by intermediate values; Briggs' multiple-source enhancement factors \[Briggs 1984\] are a candidate refinement.
+**Plume merging.** Without `fan_heat`, n\_plumes brackets the merging problem: n = 1 assumes all fan plumes merge into one (maximum rise), n = number of fans assumes none merge (minimum rise).
+
+With `fan_heat` = q\_f set, the plant is an array of n = |Q\_W| / q\_f fans on a square grid of spacing Δx = (L\_x L\_y / n)^(1/2). The rise Δh\_1 of one fan plume is computed from F = F\_b / n with the formulas above. It is then enhanced for merging along a crosswind row of N = n^(1/2) fans with Briggs' multiple-source rule \[Briggs 1974; Briggs 1984\]:
+
+```latex
+\Delta h = \Delta h_1\,M, \qquad M = \left(\frac{N + S}{1 + S}\right)^{1/3}, \qquad S = 6\left[\frac{(N-1)\,\Delta x}{N^{1/3}\,\Delta h_1}\right]^{3/2}
+```
+
+The same factor M multiplies the gradual rise. Closely spaced fans (S → 0) approach the rise of one plume carrying N times the buoyancy; widely spaced fans (S → ∞) rise independently (M → 1). The momentum rise uses the diameter of one fan, d = (4 A\_exit / (π n))^(1/2). The rule was derived for rows of stacks; applying it to one row of a two-dimensional array is the main assumption, and q\_f is an equipment-level input that operators rarely publish.
+
+This matters by day. On hot, light-wind days the fully merged plume of a 300–600 m array rises 1–2.5 km and leaves the surface layer, so it predicts essentially no ground-level warming. Measured traverses near four Phoenix data centers show 0.5–1.0 °C 100–500 m downwind \[Sailor et al. 2026\]. With q\_f = 80 kW the model reproduces them (FAC2 0.75, FB 0.15, NMSE 0.27; see `validation/benchmarks/`). At night the area treatment carries the heat, so q\_f changes the reference-case ΔT by less than 0.1%.
 
 Momentum (jet) rise is also computed and the larger of the two final rises is used, following ISC3's buoyancy/momentum crossover logic \[Briggs 1969; Briggs 1975; U.S. EPA 1995\]. With d the diameter of one plume, d = (4 A\_exit / (π n\_plumes))^(1/2), and momentum flux F\_m = w0² (d/2)² T\_a/T\_e:
 
@@ -454,7 +465,7 @@ For the Section 7 case v\_h = 0.009 m/s and F\_loss = 0.98 at 1 km and 0.90 at 5
 
 ## 6. Assumptions, validity range, and limitations
 
-The model is a screening tool: it is most reliable for relative comparisons (cooling technology, stability class, distance) and for bracketing ground-level ΔT between the area regime (best estimate) and the merged point plume (lower bound). Absolute values should be validated against measurements before use in design or policy.
+The model is a screening tool: it is most reliable for relative comparisons (cooling technology, stability class, distance) and for bracketing ground-level ΔT between the area regime (best estimate) and the merged point plume (lower bound). Absolute values have been compared only with four daytime traverses at 100–500 m (Section 8, `validation/benchmarks/`); night-time and far-field values remain untested against measurements.
 
 | Assumption or limitation | Effect on results | Where it matters most |
 | --- | --- | --- |
@@ -464,7 +475,7 @@ The model is a screening tool: it is most reliable for relative comparisons (coo
 | Pasquill–Gifford/Briggs σz curves; σy from a default or measured σθ | Empirical; valid about 100 m to 10 km in open terrain; Draxler's f\_y was fitted to near-surface releases | Near field (< 100 m) and very stable, low-wind nights |
 | Wind clipped at 1 m/s | Calm conditions not represented | Calm nights are often the highest-impact cases; these need LES |
 | Final rise = larger of buoyancy and momentum rise | Momentum rise, when it dominates, is applied at full height from the source, overstating rise in the first tens of metres | High exit velocity with small temperature excess; buoyancy dominates in all Section 7 cases |
-| Point regime: plume merging bracketed by n\_plumes | True merging lies between the n = 1 and n = N\_fans bounds | Small sources only; campus-scale arrays use the area regime |
+| Point regime: plume merging by Briggs' multiple-source rule (`fan_heat`), or bracketed by n\_plumes | The rule was derived for rows of stacks and is applied to one row of a 2-D array; q\_f is rarely published | Daytime near-field ΔT; over 50–150 kW, q\_f changes the benchmark predictions by −11% to +5%, far less than the change from the fully merged limit |
 | Penetration heuristic | Escaped fraction is removed, not re-entrained | Shallow stable layers with strongly buoyant plumes |
 | Building wake only through σz0 | No downwash cavity, no recirculation to the DC's own intakes | Receptors within a few building heights; intake recirculation needs CFD |
 | No condensation or evaporation of liquid water | Fog and visible plumes not represented; flagged when the mixing line or a receptor exceeds 100% RH | Cooling towers on cold or humid nights (e.g., 5 °C winter nights); use a wet-plume model such as SACTI there |
@@ -552,6 +563,7 @@ Writing this document exposed eight coding defects, and reviewing the Section 7 
 | 18 | A NaN anywhere in x made the heat-loss grid's maximum distance NaN | Heat loss silently switched off for every receptor (ΔT at 5 km 0.179 instead of 0.161 K); NaN receptors returned 0 | nanmax for the grid; NaN x or y now returns NaN |
 | 19 | In strip mode, diagnostics were copied from the last strip | σz, h\_eff and heat\_loss\_factor referred to an arbitrary strip (σz 41.4 vs 41.0 m) | Diagnostics from the edge-release reference; flank-receptor behaviour documented (Section 5.13) |
 | 20 | Tower bisection could return its search bound silently | Unphysical exhaust state for impossible Q\_W and airflow combinations | ValueError when the solution reaches −20 or 80 °C (Section 3.4) |
+| 21 | Found by benchmarking against the Sailor et al. (2026) traverses: the fan array was treated as one merged plume | On hot, light-wind days the plume rose 1–2.5 km and predicted < 0.01 K where 0.5–1.0 °C was measured (FB 1.98, FAC2 0) | `fan_heat` option: n fan plumes merging by Briggs' multiple-source rule (Section 5.5); the paper uses 80 kW per fan. Benchmark FAC2 0.75, FB 0.15, NMSE 0.27, MG 1.19. Night-time reference values change by < 2% (0.486 → 0.493 K at 1 km). The change was made after the comparison, so the benchmark is a consistency check, not a blind test |
 
 Two statements in the original description were also corrected: the initial vertical spread is added in quadrature rather than through ISC3's virtual distance, and the source width is now integrated exactly (Sections 5.8 and 5.10), and the penetration factor is a heuristic adapted from, not identical to, AERMOD (Section 5.6). The wind profile was also vectorized.
 
@@ -575,10 +587,12 @@ Numerical checks run on the corrected code:
 | Heat loss vs uniform-layer estimate exp(−v\_h d / (U\_dil h\_mix)), 5 km | 0.895 | 0.899 |
 | cooling\_tower\_source energy balance, 125 MW, Section 7 night | Q\_s + Q\_l from source\_terms() = 125 MW | 124.93 MW (0.06% low) |
 | NaN handling: x = \[1000, NaN, 5000\] m | Same values as without the NaN; NaN at the NaN receptor | 0.486, NaN, 0.161 K |
+| Fan-array rise (test T13): one fan (q\_f ≥ Q) vs `fan_heat=None` | Identical rise | Identical to 1e-9 |
+| Fan-array rise: q\_f = 10, 1, 0.1 MW for a 100 MW array | Rise decreases with smaller fans, stays ≥ the rise of n independent plumes | Monotonic; bound holds |
 
 Most checks above were run on the earlier direct-input dry cooler (135.5 MW, 10,500 m³/s); they verify the code, not the Section 7 numbers, and remain valid for the current version.
 
-Not yet verified: agreement with a regulatory model (AERMOD) on an identical case, and agreement with field measurements. Both are recommended before the results are used in a publication.
+Agreement with field measurements has been checked against the only published dataset, four daytime vehicle traverses 100–500 m downwind of Phoenix data centers \[Sailor et al. 2026\], with the Chang and Hanna (2004) statistics (`validation/benchmarks/benchmark_sailor2026.py`, `tutorial/02_validation_sailor2026.ipynb`). Not yet verified: the night-time mixed layer, the decay beyond 0.5 km, and agreement with a regulatory model (AERMOD) on an identical case.
 
 ### 8.2 Response to external review
 
@@ -631,6 +645,7 @@ These are the standard sources for each equation, compiled from memory rather th
 - Briggs, G.A. (1969). *Plume Rise*. AEC Critical Review Series, TID-25075. U.S. Atomic Energy Commission. (Section 5.5: momentum rise.)
 - Briggs, G.A. (1973). *Diffusion Estimation for Small Emissions*. ATDL Contribution File No. 79, NOAA Atmospheric Turbulence and Diffusion Laboratory, Oak Ridge, TN. (Section 5.7: σ formulas.)
 - Briggs, G.A. (1975). Plume rise predictions. In D.A. Haugen (Ed.), *Lectures on Air Pollution and Environmental Impact Analyses*, pp. 59–111. American Meteorological Society, Boston. (Sections 5.2, 5.5: buoyancy flux, final and gradual rise.)
+- Briggs, G.A. (1974). Plume rise from multiple sources. In *Cooling Tower Environment—1974*, CONF-740302, pp. 161–179. U.S. Energy Research and Development Administration. (Section 5.5: multiple-source enhancement M and spacing parameter S.)
 - Briggs, G.A. (1984). Plume rise and buoyancy effects. In D. Randerson (Ed.), *Atmospheric Science and Power Production*, DOE/TIC-27601. U.S. Department of Energy. (Section 5.5: multiple-source plume merging.)
 - Buck, A.L. (1981). New equations for computing vapor pressure and enhancement factor. *Journal of Applied Meteorology*, 20(12), 1527–1532. (Section 5.1; the code uses Buck's revised 1996 coefficients.)
 - Cimorelli, A.J., et al. (2005). AERMOD: A dispersion model for industrial source applications. Part I: General model formulation and boundary layer characterization. *Journal of Applied Meteorology*, 44(5), 682–693. (Section 5.6: penetration factor.)
@@ -654,6 +669,11 @@ Added for Section 5.8:
 - Draxler, R.R. (1976). Determination of atmospheric diffusion parameters. *Atmospheric Environment*, 10(2), 99–105. (Time-dependent factor f\_y.)
 - Irwin, J.S. (1983). Estimating plume dispersion: a comparison of several sigma schemes. *Journal of Climate and Applied Meteorology*, 22(1), 92–114. (σθ-based σy.)
 - U.S. EPA (2000). *Meteorological Monitoring Guidance for Regulatory Modeling Applications*. EPA-454/R-99-005. (σθ stability classification; computing σθ from wind records.)
+
+Added for model evaluation (Sections 5.5 and 8):
+
+- Chang, J.C., and Hanna, S.R. (2004). Air quality model performance evaluation. *Meteorology and Atmospheric Physics*, 87, 167–196. (FAC2, FB, NMSE, MG and acceptance criteria.)
+- Sailor, D.J., Samareh Abolhassani, S., and Martin, E.P. (2026). Data center waste heat as an emerging urban thermal hazard: first field measurements of neighborhood-scale air temperature impacts. *ASME Journal of Engineering for Sustainable Buildings and Cities*, 7(2), 024501. https://doi.org/10.1115/1.4071922 (CC-BY 4.0; benchmark measurements.)
 
 Added for Sections 5.13 and 5.14:
 

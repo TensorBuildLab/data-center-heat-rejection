@@ -1,0 +1,5 @@
+case,site,date_time_local,IT_MW,footprint_m2,footprint_note,height_m,T_C,U_ms,wind_from_deg,stability,zi_m,dist_min_m,dist_max_m,obs_dT_mean_C,obs_dT_max_C,obs_source
+a,"CyrusOne PHX1-PHX8, Chandler AZ",2025-06-18 14:25-14:45,169,340000,"34-ha campus (8 buildings, 186,000 m2 floor)",20,42.7,2.1,240,B,3000,100,500,0.8,1.5,"Sailor et al. 2026, Sec. 3.1, Table 1 col (a)"
+b,"CyrusOne PHX1-PHX8, Chandler AZ",2025-08-08 11:05-11:10,169,340000,"34-ha campus (8 buildings, 186,000 m2 floor)",20,39.1,1.5,282,A,2500,100,400,0.5,1.2,"Sailor et al. 2026, Sec. 3.1, Table 1 col (b)"
+d,"Digital Realty, 2121 S Price Rd, Chandler AZ",2025-10-25 10:55-11:05,34,48200,"~519,000 ft2 single building (datacenters.com listing); 34 MW critical IT",12,24.2,2.1,80,B,1500,100,400,1.0,2.0,"Sailor et al. 2026, Sec. 3.3, Table 1 col (d)"
+e,"NTT PH1, 10256 Elliot Rd, Mesa AZ",2025-10-25 10:30-10:40,36,5853,"11,706 m2 floor in two stories (Sailor et al. 2026)",22,25.0,1.5,150,A,1500,200,300,0.9,1.2,"Sailor et al. 2026, Sec. 3.4, Table 1 col (e)"
