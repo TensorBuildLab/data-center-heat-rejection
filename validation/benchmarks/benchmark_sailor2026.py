@@ -106,10 +106,11 @@ def setup(case):
     return g, c, mpp, polys, srcs, A, storeys
 
 
-def box_mean(case, key, load=LOAD, fan_heat=FAN_HEAT):
+def box_mean(case, key, load=LOAD, fan_heat=FAN_HEAT, sig_mult=1.0):
     g, c, mpp, polys, srcs, A, storeys = setup(case)
     roof = 12.0 if storeys == 1 else 20.0
-    amb = dp.Ambient(T=c.T_C, RH=0.15, U10=c.U_ms, stability=c.stability, mixing_height=c.zi_m, elevation=370.0)
+    amb = dp.Ambient(T=c.T_C, RH=0.15, U10=c.U_ms, stability=c.stability, mixing_height=c.zi_m, elevation=370.0,
+                     sigma_theta=sig_mult * dp._SIGMA_THETA[c.stability])
     P = receptors(g[key], mpp)
     P = P[~np.array([any(Path(p).contains_point(q) for p in polys) for q in P])]
     dT = np.zeros(len(P))
@@ -127,10 +128,10 @@ def box_mean(case, key, load=LOAD, fan_heat=FAN_HEAT):
     return float(dT.mean())
 
 
-def predict(case, load=LOAD, fan_heat=FAN_HEAT):
+def predict(case, load=LOAD, fan_heat=FAN_HEAT, sig_mult=1.0):
     """Modelled counterpart of the published box difference."""
     hi, lo = ("near", "far") if case == "e" else ("downwind", "upwind")
-    return box_mean(case, hi, load, fan_heat) - box_mean(case, lo, load, fan_heat)
+    return box_mean(case, hi, load, fan_heat, sig_mult) - box_mean(case, lo, load, fan_heat, sig_mult)
 
 
 def metrics(o, p):
