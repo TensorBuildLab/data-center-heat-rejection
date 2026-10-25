@@ -136,6 +136,23 @@ What this shows:
 - **Individual cases are not reproduced.** FAC2 is 0.25, FB 0.39, NMSE 1.14 and MG 2.25, against Chang & Hanna's acceptance of FAC2 ≥ 0.5 and magnitude of FB ≤ 0.3.
 - **Why single traverses are limited.** Each value is one 5–20 min pass, three of the four winds come from airports several kilometres away, and the compared areas differ in land cover. Case e in particular needs a wind closer to due south than the one recorded.
 
+**Post-hoc uncertainty analysis and per-case diagnosis** (labelled as such in `PROTOCOL.md`):
+
+```bash
+python validation/benchmarks/wind_uncertainty_sailor2026.py   # about 15 min -> results/benchmarks/wind_uncertainty.{csv,json}
+python validation/benchmarks/case_studies_sailor2026.py       # about 10 min -> case_studies.{csv,json}, neighbour_check.csv, fig_case_studies.png
+```
+
+- `wind_uncertainty_sailor2026.py` estimates the airport wind-direction error from Phoenix-area ASOS pairs (median daytime disagreement 40–60°, so about 35° between one airport and a site). It then propagates that error and load fractions of 0.5–1.0 through the benchmark. Cases a and b fall inside the 5–95 % prediction range, at the 92nd and 20th percentiles. Cases d and e lie above it.
+- `case_studies_sailor2026.py` writes, for each case:
+  - a map of the modelled 2 m ΔT with the published areas;
+  - the prediction against wind direction;
+  - the single input change that would reproduce the observation;
+  - a downwash upper bound;
+  - the measured spread in each area (Table 1 of the article);
+  - a check of unmodelled neighbouring buildings (a hypothesis, not a correction).
+  It produces Fig. 2 of the paper.
+
 The benchmark covers four daytime cases at 15–570 m. It does not test the night-time mixed layer or the decay beyond 0.5 km. An earlier version used square-equivalent sites and generic distances (repository commit f577c8e: FAC2 0.75); `PROTOCOL.md` explains why it was replaced. `tutorial/02_validation_sailor2026.ipynb` walks through the comparison step by step and shows how to add new cases.
 
 ## Tutorials: `tutorial/`
@@ -161,7 +178,7 @@ All scripts share `reference_case.py`. It defines the reference night (Phoenix, 
 | `fig3_fig4_profiles_maps.py` | Fig. 3: plume-axis ΔT and ΔRH profiles, including the edge-release-to-strips band and the point-plume lower bound. Fig. 4: 2-D ΔT and ΔRH maps |
 | `fig5_sensitivity.py` | One-at-a-time sensitivity of ΔT at 1 and 5 km to σθ, dθ/dz, the entrainment constant, U₁₀, the blend exponent, along-wind treatment, heat load, C_H, z_i and heat per fan (Fig. 5, tornado chart). Also prints the day and night stability × wind-speed matrix at 1 km for both technologies (Table 6) |
 | `fig6_campus_scale.py` | ΔT 0.5 and 3 km beyond the fence for 25 MW–3 GW campuses at constant heat flux per area (Fig. 6). Also prints h_mix and fixed-distance values |
-| `validation/benchmarks/benchmark_sailor2026.py` | Fig. 2 and Table 4 (see above) |
+| `validation/benchmarks/benchmark_sailor2026.py`, `wind_uncertainty_sailor2026.py`, `case_studies_sailor2026.py` | Table 4 and Fig. 2 (see above) |
 | `analysis/exceedance.py`, `analysis/plot_exceedance.py` | Table 7 and Fig. 7 (see below) |
 
 ```bash

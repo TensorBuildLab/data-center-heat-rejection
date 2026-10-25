@@ -45,7 +45,7 @@ ax[1].set(xlabel="Downwind distance from campus centre (km)", ylabel="ΔRH at 2 
 ax[1].text(0.95, 0.97, "(b)", transform=ax[1].transAxes, va="top", fontweight="bold")
 ax[1].legend(frameon=False, fontsize=7, loc="center right")
 fig.tight_layout()
-fig.savefig(fig_path("fig3_profiles.png"), dpi=200)
+fig.savefig(fig_path("fig3_profiles.png"), dpi=300)
 
 # ---------------------------------------------------------------- Fig. 4: 2-D maps
 X = np.linspace(-500, 5000, 331)[:, None]          # along-wind, m (broadcast to a grid)
@@ -75,5 +75,5 @@ cb2.set_label("ΔRH (pp)")
 for a_ in ax:
     a_.set_xlabel("Along-wind x (km)")
 ax[0].set_ylabel("Crosswind y (km)")
-fig.savefig(fig_path("fig4_maps.png"), dpi=200, bbox_inches="tight")
+fig.savefig(fig_path("fig4_maps.png"), dpi=300, bbox_inches="tight")
 print("wrote", fig_path("fig3_profiles.png"), "and", fig_path("fig4_maps.png"))

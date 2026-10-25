@@ -66,5 +66,5 @@ if __name__ == "__main__":
     ax.grid(alpha=.3)
     ax.set_title("Distance beyond downwind fence line", fontsize=8, loc="left")
     fig.tight_layout()
-    fig.savefig(fig_path("fig6_scale.png"), dpi=200, bbox_inches="tight")
+    fig.savefig(fig_path("fig6_scale.png"), dpi=300, bbox_inches="tight")
     print("\nwrote", fig_path("fig6_scale.png"))

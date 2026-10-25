@@ -96,5 +96,5 @@ if __name__ == "__main__":
                           Patch(color="#c0392b", label="Second value in label")],
                  frameon=False, fontsize=7, loc="lower right")
     fig.tight_layout()
-    fig.savefig(fig_path("fig5_sensitivity.png"), dpi=200, bbox_inches="tight")
+    fig.savefig(fig_path("fig5_sensitivity.png"), dpi=300, bbox_inches="tight")
     print("\nwrote", fig_path("fig5_sensitivity.png"))

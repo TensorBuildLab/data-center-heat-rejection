@@ -45,3 +45,52 @@ Two implementation bugs were found by inspecting box-by-box values. Neither chan
 | e (near − far) | 0.9 | 0.08 [0.06–0.12] | 0.09 |
 
 FAC2 0.25, FB 0.39, NMSE 1.14, MG 2.25. None of the four observations lies inside the input-uncertainty range. The fully merged plume predicts < 0.01 K in every case.
+
+## Post-hoc analyses (2026-10-21 to 2026-10-25)
+
+These analyses were run after the version-2 results above had been seen. None changes a rule of the benchmark or its central result. They report what range of predictions the published inputs allow, and what could explain the residuals.
+
+### Wind-direction and load uncertainty (`wind_uncertainty_sailor2026.py`)
+
+The traverse winds come from airport stations several kilometres from the sites. Daytime hours (10–15 MST) with 1–3 m/s at both stations of four Phoenix-area ASOS pairs (KCHD, KIWA, KFFZ, KPHX; IEM, 2019–2025) give a median absolute direction difference of 40–60°. Only 30–41 % of hours agree within 30°. That corresponds to about 35° between one airport and a site; 50° is run as a sensitivity case. Each case is run for offsets of −90° to +90° (Gaussian weights) and load fractions of 0.5, 0.75 and 1.0.
+
+| Case | Observed | Central | 5–95 % (σ = 35°) | Percentile of observation | P(within 15 %) |
+| --- | --- | --- | --- | --- | --- |
+| a | 0.8 | 0.50 | −0.12 to 0.82 | 92 | 0.13 |
+| b | 0.5 | 1.32 | 0.13 to 1.96 | 20 | 0.06 |
+| d | 1.0 | 0.26 | 0.02 to 0.38 | above | 0 |
+| e | 0.9 | 0.08 | −0.09 to 0.57 | above | 0 |
+
+Two of the four observations lie inside the 5–95 % range. The results with σ = 50° are almost the same (`results/benchmarks/wind_uncertainty.csv`). A downwash upper bound (`case_studies_sailor2026.py`), with all heat held at roof + 2 m and no rise, gives a 0.68, b 1.99, d 0.68 and e 0.15 K. Missing downwash physics therefore cannot explain cases d and e.
+
+### Per-case diagnosis and neighbour check (`case_studies_sailor2026.py`)
+
+The table gives the single input change that would reproduce each observation, compared with its plausible range (direction within ±70°, i.e. 2σ; load 0.5–1.0; roof 8–24 m):
+
+| Case | Wind direction | Load fraction | Roof height |
+| --- | --- | --- | --- |
+| a | +30° gives 0.79 K (inside 1σ) | 1.26 (outside) | no effect (0.50–0.51 K) |
+| b | −34° (inside 1σ) | 0.38 (outside) | 24 m gives 1.03 K; not reached |
+| d | none: maximum 0.34 K over ±90° | 1.85 (outside) | 0.22–0.31 K; not reached |
+| e | none: maximum 0.53 K at +30° | > 3 (outside) | 0.08–0.11 K; not reached |
+
+The measured point-to-point spread between the two areas (Table 1 of the article) runs from −0.6 to +2.2 °C (a), −0.1 to +1.2 (b), +0.6 to +1.4 (d) and +0.4 to +1.4 (e).
+
+Neighbour check: some buildings visible in the article's Fig. 2 are not the studied facility. The table gives the heat each would need to reject to close the gap. These are hypotheses, not corrections, and the benchmark sources are unchanged.
+
+| Case | Building | Area (m²) | ΔT difference per 10 MW (K) | Heat needed (MW) |
+| --- | --- | --- | --- | --- |
+| d | about 90 m north of the facility | 14,700 | 0.030 | about 250 |
+| d | about 50 m south of the facility | 7,700 | 0.181 | about 40 |
+| e | west of the facility | 44,300 | −0.041 | – (reduces the contrast) |
+| e | south of the facility | 9,700 | 0.002 | about 5,000 |
+
+A neighbouring data center of about 40 MW south of Digital Realty could explain case d. No plausible neighbour explains case e.
+
+### Case c (Aligned, Chandler)
+
+A web search on 2026-10-25 (Aligned, Baxtel, DataCenterHawk, Data Center Frontier, datacentermap and City of Chandler records) found floor areas for Aligned's Price Road buildings (PHX-04: 396,343 sq ft) and a 400 MW total for two new Phoenix-area campuses. It found no IT capacity for the facility in the article's Fig. 2c. Case c therefore remains excluded.
+
+### Other datasets
+
+A literature search in English and Chinese, covering journals, theses, news of the Sailor et al. study, cooling-tower and condenser-array studies and wind-farm analogues, found no other published air-temperature measurements near data centers. Satellite studies report land surface temperature, not air temperature. No dataset was added.
