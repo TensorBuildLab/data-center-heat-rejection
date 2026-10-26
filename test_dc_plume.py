@@ -278,3 +278,37 @@ def test_T13_fan_array_rise():
     assert rises[2] >= single
     with pytest.raises(ValueError):
         plume(dp.dry_cooler_source(100e6, 11.0, amb, fan_heat=-1.0, **geom), amb, x)
+
+
+# ---------------------------------------------------------------- T14
+def test_T14_building_downwash():
+    """ISC3 building downwash (downwash=True): no effect without a building or when the
+    release is above the GEP height; inside the wake the Schulman-Scire rise is lower than
+    the free rise, near-field dT rises, and the heat flux through a cross-section is kept."""
+    amb = Ambient(T=30.0, RH=0.2, U10=2.0, stability="B", mixing_height=1500.0, elevation=340.0)
+    geom = dict(footprint_x=200.0, footprint_y=200.0, exit_velocity=3.0, fan_heat=80e3)
+    x = np.array([150.0, 400.0])
+    free = dp.dry_cooler_source(50e6, 11.0, amb, height=14.0, building_height=12.0, **geom)
+    down = dp.dry_cooler_source(50e6, 11.0, amb, height=14.0, building_height=12.0, downwash=True, **geom)
+    nob = dp.dry_cooler_source(50e6, 11.0, amb, height=14.0, building_height=0.0, downwash=True, **geom)
+    tall = dp.dry_cooler_source(50e6, 11.0, amb, height=60.0, building_height=12.0, downwash=True, **geom)
+    tall0 = dp.dry_cooler_source(50e6, 11.0, amb, height=60.0, building_height=12.0, **geom)
+    nob0 = dp.dry_cooler_source(50e6, 11.0, amb, height=14.0, building_height=0.0, **geom)
+    r_free, r_down = plume(free, amb, x, regime="point"), plume(down, amb, x, regime="point")
+    assert r_down["final_rise"] < r_free["final_rise"]
+    assert r_down["dT"][0] > r_free["dT"][0]
+    np.testing.assert_allclose(plume(nob, amb, x, regime="point")["dT"],
+                               plume(nob0, amb, x, regime="point")["dT"], rtol=1e-12)
+    np.testing.assert_allclose(plume(tall, amb, x, regime="point")["dT"],
+                               plume(tall0, amb, x, regime="point")["dT"], rtol=1e-12)
+    st = source_terms(down, amb)
+    y = np.linspace(-3000, 3000, 1201)
+    z = np.linspace(0.0, 1500.0, 601)
+    zc = z[:-1] + np.diff(z) / 2
+    flux = 0.0
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        for zz, dz in zip(zc, np.diff(z)):
+            r = plume(down, amb, np.full_like(y, 2000.0), y, z=zz, regime="point")
+            flux += simpson(r["U_dilution"] * r["dT"], x=y) * dz
+    assert flux / (st["Q_s"] / (st["rho_a"] * st["cp_a"])) == pytest.approx(1.0, abs=2e-3)

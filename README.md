@@ -76,14 +76,14 @@ Main options of `plume()`:
 | `alongwind_strips` | 1 = release at the downwind edge (upper near-field estimate); 2–5 = Gauss–Legendre strips over the footprint (lower estimate) |
 | `z` | receptor height (default 2 m, weather-station height) |
 
-Main options of the source helpers: `fan_heat` (W per fan or tower cell; `None` = one merged plume), `exit_velocity` (m/s), `height`, `footprint_x`, `footprint_y`, `building_height`.
+Main options of the source helpers: `fan_heat` (W per fan or tower cell; `None` = one merged plume), `exit_velocity` (m/s), `height`, `footprint_x`, `footprint_y`, `building_height`, and `downwash` (ISC3 building downwash of the point plume; default `False`, a sensitivity option).
 
 Key assumptions: steady state within the hour; horizontally homogeneous atmosphere; flat terrain; excess heat and vapor are passive after rise and mixing; wind below 1 m/s is clipped to 1 m/s. `docs/technical_reference.md` gives every equation (Section 5), the inputs and outputs (Sections 3–4), the validity range (Section 6), a worked Phoenix example (Section 7), and a ledger of every defect found and fixed during development and review (Section 8).
 
 ## Tests
 
 ```bash
-python -m pytest -q          # 22 test cases (T1–T13, some parametrized), about 1–2 minutes
+python -m pytest -q          # 23 test cases (T1–T14, some parametrized), about 1–2 minutes
 ```
 
 | Test | What it checks | Criterion |
@@ -101,6 +101,7 @@ python -m pytest -q          # 22 test cases (T1–T13, some parametrized), abou
 | T11 | Mixing-line saturation check for tower exhaust: summer max RH 0.950, winter 1.002 | warning only in winter |
 | T12 | Reference case without `fan_heat`: air-cooled 0.486 / 0.161 K and water-cooled 0.052 / 0.009 K at 1 / 5 km | within 1e-3 K |
 | T13 | Fan-array rise: `fan_heat=None` unchanged; one fan equals the merged plume; smaller fans rise less; n merging fans rise at least as high as independent ones; invalid `fan_heat` raises | as stated |
+| T14 | Building downwash: no effect without a building or above the GEP height; lower rise and higher near-field ΔT in the wake; heat flux conserved | as stated, flux within 0.2 % |
 
 T12 guards against unintended changes in results. If a deliberate model change alters it, update the expected values and record the change in the technical reference's verification ledger.
 

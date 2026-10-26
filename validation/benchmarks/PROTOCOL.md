@@ -94,3 +94,16 @@ A web search on 2026-10-25 (Aligned, Baxtel, DataCenterHawk, Data Center Frontie
 ### Other datasets
 
 A literature search in English and Chinese, covering journals, theses, news of the Sailor et al. study, cooling-tower and condenser-array studies and wind-farm analogues, found no other published air-temperature measurements near data centers. Satellite studies report land surface temperature, not air temperature. No dataset was added.
+
+### Building downwash sensitivity (`benchmark_sailor2026.py --downwash`, 2026-10-25)
+
+The fans release about 2 m above the roofs, which is below the GEP height h_b + 1.5 L_B. The model was therefore run with the optional ISC3 building-downwash treatment (Schulman–Scire reduced rise and Huber–Snyder wake spreads). The rules above are otherwise unchanged.
+
+| Case | Observed | Without downwash | With downwash | Change |
+| --- | --- | --- | --- | --- |
+| a | 0.8 | 0.499 | 0.505 | +0.006 |
+| b | 0.5 | 1.316 | 1.512 | +0.196 |
+| d | 1.0 | 0.259 | 0.285 | +0.026 |
+| e | 0.9 | 0.083 | 0.099 | +0.016 |
+
+FAC2 stays at 0.25 and FB changes from 0.39 to 0.29. Downwash does not change the comparison, so the benchmark keeps the default model.

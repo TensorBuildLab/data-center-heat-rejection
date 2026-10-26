@@ -87,6 +87,7 @@ All inputs are grouped into two dataclasses, `HeatSource` (the equipment) and `A
 | `n_plumes` | – | Number of independent plumes sharing the buoyancy | Point regime only. 1 = all fans merge (maximum rise). N\_fans = no merging (minimum rise). Default 1. Ignored when `fan_heat` is set |
 | `fan_heat` | W | Heat rejected per fan or tower cell (sensible + latent) | Point regime only. When set, the plant is a fan array whose individual plumes merge by Briggs' multiple-source rule (Section 5.5). Dry-cooler and condenser fans 50–150 kW (80 kW used in the paper); tower cells 5–10 MW (8 MW). `None` (default) keeps the `n_plumes` behaviour |
 | `building_height` | m | Height of the structure the equipment sits on | Sets initial vertical spread σz0 = building\_height / 2.15 to mimic wake mixing. 0 to disable |
+| `downwash` | – | ISC3 building downwash of the point plume | Default `False`. When `True` and the plume is in the building wake, Section 5.5 (building downwash) applies. Used only as a sensitivity case in the paper |
 
 ### 3.2 Ambient
 
@@ -305,6 +306,16 @@ Momentum (jet) rise is also computed and the larger of the two final rises is us
 ```
 
 When Δh\_m exceeds the buoyant final rise, Δh(x) = Δh\_m at all distances, since jet rise is completed within a few tens of metres.
+
+**Building downwash (optional, `downwash=True`).** This follows ISC3 \[U.S. EPA 1995, Sections 1.1.4.11 and 1.1.5.3\], with h\_b = building\_height and L\_B = min(h\_b, crosswind width).
+- **Wake check.** The plume is in the wake when h\_e ≤ h\_b + 1.5 L\_B. Here h\_e is the release height plus the gradual momentum rise of one fan at 2 h\_b.
+- **Schulman–Scire treatment** (release height < h\_b + 0.5 L\_B):
+  - The rise of one fan plume is reduced by its initial dilution in the wake: Z³ + (3R₀/β)Z² + (3R₀²/β²)Z = 3F x²/(2β²U³), with R₀ = √2 A σz(3L\_B) and β = 0.6. The stable and momentum forms follow ISC3, and the larger of buoyant and momentum rise is used.
+  - The fan-merging enhancement M is then applied to this reduced rise.
+  - A = 1 − (h\_e − h\_b)/(2L\_B), clipped to [0, 1], is the linear decay factor.
+- **Wake spreads (Huber–Snyder).** σz = A[0.7 h\_b + 0.067(x − 3h\_b)] for 3h\_b ≤ x < 10h\_b, and σz(x + x\_z) beyond, never below the curve value. σy is at least 0.35 h\_b + 0.067(x − 3h\_b). The initial σz0 is then not added.
+- **Checks.** Heat flux through a cross-section is conserved (test T14).
+- **Effect on the benchmark.** Predictions rise by 0.006–0.026 K for cases a, d and e and by 0.20 K for case b. FB changes from 0.39 to 0.29, and FAC2 stays at 0.25 (`benchmark_sailor2026.py --downwash`).
 
 ### 5.6 Penetration of the capping inversion
 
@@ -563,6 +574,7 @@ Writing this document exposed eight coding defects, and reviewing the Section 7 
 | 18 | A NaN anywhere in x made the heat-loss grid's maximum distance NaN | Heat loss silently switched off for every receptor (ΔT at 5 km 0.179 instead of 0.161 K); NaN receptors returned 0 | nanmax for the grid; NaN x or y now returns NaN |
 | 19 | In strip mode, diagnostics were copied from the last strip | σz, h\_eff and heat\_loss\_factor referred to an arbitrary strip (σz 41.4 vs 41.0 m) | Diagnostics from the edge-release reference; flank-receptor behaviour documented (Section 5.13) |
 | 20 | Tower bisection could return its search bound silently | Unphysical exhaust state for impossible Q\_W and airflow combinations | ValueError when the solution reaches −20 or 80 °C (Section 3.4) |
+| 22 | Building downwash was represented only by σz0 = H\_b/2.15, although the fans release about 2 m above roofs (below the GEP height h\_b + 1.5 L\_B) | Possible underestimate of daytime near-field warming | Optional ISC3 downwash (Schulman–Scire reduced rise, Huber–Snyder wake spreads), test T14. Benchmark change ≤ 0.2 K; the default is unchanged, and downwash is reported as a sensitivity case only |
 | 21 | Found by benchmarking against the Sailor et al. (2026) traverses: the fan array was treated as one merged plume | On hot, light-wind days the plume rose 1–2.5 km and predicted < 0.01 K where 0.5–1.0 °C was measured (FB 1.98, FAC2 0) | `fan_heat` option: n fan plumes merging by Briggs' multiple-source rule (Section 5.5); the paper uses 80 kW per fan. Night-time reference values change by < 2% (0.486 → 0.493 K at 1 km). In the geometry-resolved benchmark (`validation/benchmarks/PROTOCOL.md`), the mean predicted warming is 0.54 K against 0.80 °C observed, while the merged plume gives < 0.01 K. Individual cases are not reproduced (FAC2 0.25, FB 0.39). The change was made after an earlier comparison, so the benchmark is not a blind test |
 
 Two statements in the original description were also corrected: the initial vertical spread is added in quadrature rather than through ISC3's virtual distance, and the source width is now integrated exactly (Sections 5.8 and 5.10), and the penetration factor is a heuristic adapted from, not identical to, AERMOD (Section 5.6). The wind profile was also vectorized.

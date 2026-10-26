@@ -20,6 +20,8 @@ Metrics (Chang & Hanna 2004): FAC2, FB, NMSE, MG. The fully merged plume (fan_he
 shown for comparison.
 Run from the repo root:  python validation/benchmarks/benchmark_sailor2026.py
 Outputs: results/benchmarks/{benchmark.csv, metrics.json, fig_benchmark.png}
+With --downwash: post-hoc sensitivity with ISC3 building downwash (benchmark_downwash.csv,
+metrics_downwash.json).
 """
 import os, sys, json, warnings
 import numpy as np, pandas as pd
@@ -106,7 +108,7 @@ def setup(case):
     return g, c, mpp, polys, srcs, A, storeys
 
 
-def box_mean(case, key, load=LOAD, fan_heat=FAN_HEAT, sig_mult=1.0):
+def box_mean(case, key, load=LOAD, fan_heat=FAN_HEAT, sig_mult=1.0, downwash=False):
     g, c, mpp, polys, srcs, A, storeys = setup(case)
     roof = 12.0 if storeys == 1 else 20.0
     amb = dp.Ambient(T=c.T_C, RH=0.15, U10=c.U_ms, stability=c.stability, mixing_height=c.zi_m, elevation=370.0,
@@ -117,7 +119,8 @@ def box_mean(case, key, load=LOAD, fan_heat=FAN_HEAT, sig_mult=1.0):
     for Lx, Ly, area, xy in srcs:
         Q = c.IT_MW * 1e6 * load * PUE * area / A
         src = dp.dry_cooler_source(Q, DT_EXH, amb, height=roof + 2.0, footprint_x=Lx, footprint_y=Ly,
-                                   building_height=roof, exit_velocity=W_EXIT, fan_heat=fan_heat)
+                                   building_height=roof, exit_velocity=W_EXIT, fan_heat=fan_heat,
+                                   downwash=downwash)
         x, y = xy(P)
         ok = x > -1e5
         if ok.any():
@@ -128,10 +131,11 @@ def box_mean(case, key, load=LOAD, fan_heat=FAN_HEAT, sig_mult=1.0):
     return float(dT.mean())
 
 
-def predict(case, load=LOAD, fan_heat=FAN_HEAT, sig_mult=1.0):
+def predict(case, load=LOAD, fan_heat=FAN_HEAT, sig_mult=1.0, downwash=False):
     """Modelled counterpart of the published box difference."""
     hi, lo = ("near", "far") if case == "e" else ("downwind", "upwind")
-    return box_mean(case, hi, load, fan_heat, sig_mult) - box_mean(case, lo, load, fan_heat, sig_mult)
+    return (box_mean(case, hi, load, fan_heat, sig_mult, downwash)
+            - box_mean(case, lo, load, fan_heat, sig_mult, downwash))
 
 
 def metrics(o, p):
@@ -144,7 +148,25 @@ def metrics(o, p):
                 MG=float(np.exp(np.mean(np.log(o[ok] / p[ok])))) if ok.all() else float("nan"))
 
 
+def downwash_sensitivity():
+    """Post-hoc sensitivity (PROTOCOL.md): the same comparison with ISC3 building downwash."""
+    rows = []
+    for c in CASES.itertuples():
+        base, dw = predict(c.case), predict(c.case, downwash=True)
+        rows.append(dict(case=c.case, obs=c.obs_dT_C, pred=round(base, 3), pred_downwash=round(dw, 3),
+                         change=round(dw - base, 3)))
+    t = pd.DataFrame(rows)
+    t.to_csv(os.path.join(OUT, "benchmark_downwash.csv"), index=False)
+    m = dict(without=metrics(t.obs, t.pred), with_downwash=metrics(t.obs, t.pred_downwash))
+    json.dump(m, open(os.path.join(OUT, "metrics_downwash.json"), "w"), indent=1)
+    print(t.to_string(index=False))
+    print(json.dumps(m, indent=1))
+
+
 def main():
+    if "--downwash" in sys.argv:
+        os.makedirs(OUT, exist_ok=True)
+        return downwash_sensitivity()
     os.makedirs(OUT, exist_ok=True)
     rows = []
     for c in CASES.itertuples():

@@ -109,6 +109,10 @@ class HeatSource:
                                       # When set, plume rise follows Briggs' (1974) multiple-
                                       # source merging for the fan array (_point_rise) and
                                       # n_plumes is ignored. None: n_plumes behaviour.
+    downwash: bool = False      # building downwash of the point plume (ISC3: Schulman-Scire
+                                # reduced rise and linear decay factor, Huber-Snyder wake
+                                # sigmas) when the release is within the building wake.
+                                # Needs building_height > 0. False: wake only through sigma_z0.
 
 @dataclass
 class Ambient:
@@ -260,6 +264,92 @@ def _fan_array(src, st):
     return n, float(np.sqrt(src.footprint_x * src.footprint_y / n))
 
 
+def _downwash(src, st, amb, stab, s, U_s):
+    """Building-downwash state after ISC3 (U.S. EPA 1995, Sections 1.1.4.11 and 1.1.5.3),
+    or None when the plume is not in the wake.
+    hb = building_height, LB = min(hb, crosswind width). The wake check uses the release
+    height plus gradual momentum rise at 2 hb (one fan when fan_heat is set); the plume is
+    in the wake when that height he <= hb + 1.5 LB (GEP). The Schulman-Scire treatment
+    (reduced rise, linear decay factor A) applies when the release height < hb + 0.5 LB;
+    otherwise Huber-Snyder (A = 1, rise unchanged)."""
+    hb = src.building_height
+    if not src.downwash or hb <= 0:
+        return None
+    LB = min(hb, src.footprint_y)
+    n = _fan_array(src, st)[0] if src.fan_heat is not None else src.n_plumes
+    r = 0.5 * np.sqrt(4 * src.exit_area / (np.pi * n))                # one fan / plume radius
+    Fm = st["w0"] ** 2 * r ** 2 * (amb.T + 273.15) / (src.T_exit + 273.15)
+    bj = 1.0 / 3.0 + U_s / max(st["w0"], 1e-6)
+    he = src.height + (3.0 * Fm * 2.0 * hb / (bj ** 2 * U_s ** 2)) ** (1 / 3)
+    if he > hb + 1.5 * LB:
+        return None
+    ss = src.height < hb + 0.5 * LB
+    A = 1.0
+    if ss and he > hb:
+        A = max(0.0, (hb - he) / (2.0 * LB) + 1.0)
+    return dict(hb=hb, LB=LB, A=A, schulman_scire=ss, he=he, Fm1=Fm, bj=bj)
+
+
+def _wake_sigma_z(dw, sigz_curve, x):
+    """Huber-Snyder wake sigma_z (squat building), times the linear decay factor A:
+    0.7 hb + 0.067 (x - 3 hb) for 3 hb <= x < 10 hb (x < 3 hb: the 3 hb value),
+    sigma_z(x + xz) beyond, with xz such that sigma_z(10 hb + xz) = 1.2 A hb."""
+    hb, A = dw["hb"], dw["A"]
+    x = np.asarray(x, float)
+    near = A * (0.7 * hb + 0.067 * (np.clip(x, 3 * hb, 10 * hb) - 3 * hb))
+    target = 1.2 * A * hb
+    lo, hi = 0.0, 1e5                                   # sigma_z curve increases with x
+    for _ in range(60):
+        mid = 0.5 * (lo + hi)
+        lo, hi = (mid, hi) if sigz_curve(mid) < target else (lo, mid)
+    xz = max(0.0, 0.5 * (lo + hi) - 10 * hb)
+    far = sigz_curve(np.maximum(x, 10 * hb) + xz)
+    return np.where(x < 10 * hb, near, far)
+
+
+def _ss_rise(dw, F, Fm, bj, U, stab, s, x, x_final, sigz_curve):
+    """Schulman-Scire reduced rise of one downwashed plume (ISC3 Eqs. 1-28 to 1-31):
+    Z^3 + (3 R0/b) Z^2 + (3 R0^2/b^2) Z = RHS, R0 = sqrt(2) A sigma_z(3 LB), b = 0.6
+    (line-source length Ly = 0: for wide buildings the wake sigma_y < sigma_z).
+    Buoyant and momentum rise are solved separately and the larger is used."""
+    b = 0.6
+    R0 = np.sqrt(2.0) * dw["A"] * max(0.7 * dw["hb"], float(sigz_curve(3 * dw["LB"])))
+    x = np.asarray(x, float)
+    if stab in ("E", "F") and s > 0:
+        xs = np.minimum(np.maximum(x, 0), np.pi * U / np.sqrt(s))
+        rhs_b = 6.0 * F / (b ** 2 * U * s) * (1 - np.cos(np.sqrt(s) * xs / U))
+        rhs_m = 3.0 * Fm * np.sin(np.sqrt(s) * xs / U) / (bj ** 2 * U * np.sqrt(s))
+    else:
+        xs = np.minimum(np.maximum(x, 0), x_final)
+        rhs_b = 3.0 * F * xs ** 2 / (2 * b ** 2 * U ** 3)
+        rhs_m = 3.0 * Fm * xs / (bj ** 2 * U ** 2)
+    a1, a2 = 3 * R0 / b, 3 * R0 ** 2 / b ** 2
+
+    def solve(rhs):
+        rhs = np.maximum(rhs, 0.0)
+        Z = np.cbrt(rhs)                                 # Newton from the no-dilution root
+        for _ in range(40):
+            f = Z ** 3 + a1 * Z ** 2 + a2 * Z - rhs
+            Z = np.maximum(Z - f / (3 * Z ** 2 + 2 * a1 * Z + a2), 0.0)
+        return Z
+    return np.maximum(solve(rhs_b), solve(rhs_m))
+
+
+def _ss_rise_pair(dw, src, st, amb, stab, s, U_s, d, F):
+    """(gradual, final) Schulman-Scire rise of one plume of buoyancy flux F."""
+    sig = _SIG_URBAN if amb.urban else _SIG_RURAL
+    if F > 0 and not (stab in ("E", "F") and s > 0):
+        x_star = 14 * F ** 0.625 if F < 55 else 34 * F ** 0.4
+        x_final = 3.5 * x_star
+    else:
+        x_final = 1e9
+    sz = sig[stab][1]
+    F = max(F, 0.0)
+    dh_x = _ss_rise(dw, F, dw["Fm1"], dw["bj"], U_s, stab, s, d, x_final, sz)
+    dh_f = float(_ss_rise(dw, F, dw["Fm1"], dw["bj"], U_s, stab, s, np.array([1e7]), x_final, sz)[0])
+    return dh_x, dh_f
+
+
 def _point_rise(src, st, amb, stab, s, U_s, d):
     """Point-regime rise along distance d: buoyant (Briggs) or momentum, whichever
     gives the larger final rise. Returns (dh(d), dh_final).
@@ -267,9 +357,13 @@ def _point_rise(src, st, amb, stab, s, U_s, d):
     is enhanced by merging along each crosswind row of N = sqrt(n) fans spaced dx apart
     (Briggs 1974, plume rise from multiple sources):
         dh = dh_1 E,  E = ((N + S)/(1 + S))^(1/3),  S = 6 [(N - 1) dx / (N^(1/3) dh_1)]^(3/2)."""
+    dw = _downwash(src, st, amb, stab, s, U_s)
+    ss = dw is not None and dw["schulman_scire"]
     if src.fan_heat is not None:
         n, dx = _fan_array(src, st)
         dh_x, dh_f = briggs_rise(st["F_b"] / n, U_s, stab, s, d)
+        if ss:
+            dh_x, dh_f = _ss_rise_pair(dw, src, st, amb, stab, s, U_s, d, st["F_b"] / n)
         if dh_f > 0 and n > 1:
             N = max(1.0, np.sqrt(n))
             S = 6.0 * ((N - 1.0) * dx / (N ** (1 / 3) * dh_f)) ** 1.5
@@ -277,10 +371,12 @@ def _point_rise(src, st, amb, stab, s, U_s, d):
             dh_x, dh_f = dh_x * E, dh_f * E
         d_plume = np.sqrt(4 * src.exit_area / (np.pi * n))
         dh_m = momentum_rise(st["w0"], d_plume, src.T_exit + 273.15, amb.T + 273.15, U_s, stab, s)
-        if dh_m > dh_f:
+        if dh_m > dh_f and not ss:                  # SS rise already includes momentum
             return np.full_like(np.asarray(d, float), dh_m), dh_m
         return dh_x, dh_f
     dh_x, dh_f = briggs_rise(st["F_b"] / src.n_plumes, U_s, stab, s, d)
+    if ss:
+        return _ss_rise_pair(dw, src, st, amb, stab, s, U_s, d, st["F_b"] / src.n_plumes)
     d_plume = np.sqrt(4 * src.exit_area / (np.pi * src.n_plumes))     # one plume
     dh_m = momentum_rise(st["w0"], d_plume, src.T_exit + 273.15, amb.T + 273.15,
                          U_s, stab, s)
@@ -309,6 +405,7 @@ def _component(kind, src, amb, st, stab, s, U_s, h_conv, x, y, z, mode, lateral,
     r = np.abs(x) if mode == "radial" else x
 
     # ---- release geometry, as a function of distance d from the release line
+    dw = None
     if kind == "area":
         d = r - (src.footprint_x / 2 if x_release is None else x_release)
         h_mix = max(h_conv, src.height)
@@ -324,6 +421,9 @@ def _component(kind, src, amb, st, stab, s, U_s, h_conv, x, y, z, mode, lateral,
         else:
             rise = lambda dd: (np.zeros_like(np.asarray(dd, float)), 0.0)
         sz0 = src.building_height / 2.15
+        dw = _downwash(src, st, amb, stab, s, U_s)
+        if dw is not None:
+            sz0 = 0.0                                   # wake spread handled by Huber-Snyder
         release = lambda dh: np.minimum(src.height + dh, 0.98 * zi)
         _, dh_f0 = rise(np.array([1.0]))
         if src.height >= zi:
@@ -345,8 +445,13 @@ def _component(kind, src, amb, st, stab, s, U_s, h_conv, x, y, z, mode, lateral,
             sy_t = th * ds / (1.0 + 0.9 * np.sqrt(ds / U / 1000.0))   # Draxler (1976)
         else:
             sy_t = sig[stab][0](ds)
+        sz_t = sig[stab][1](ds)
+        if dw is not None:                              # ISC3 building-wake sigmas
+            sz_t = np.maximum(sz_t, _wake_sigma_z(dw, sig[stab][1], ds))
+            hb = dw["hb"]
+            sy_t = np.maximum(sy_t, 0.35 * hb + 0.067 * (np.clip(ds, 3 * hb, None) - 3 * hb))
         sy = np.sqrt(sy_t ** 2 + (dh / 3.5) ** 2)
-        sz = np.sqrt(sig[stab][1](ds) ** 2 + sz0 ** 2 + (dh / 3.5) ** 2)
+        sz = np.sqrt(sz_t ** 2 + sz0 ** 2 + (dh / 3.5) ** 2)
         return sy, sz, h_rel, U, dh, dh_f
 
     sy, sz, h_rel, U, dh_x, dh_f = spreads(d)
